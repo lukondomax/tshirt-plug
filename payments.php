@@ -1103,6 +1103,8 @@ td.particular {
 
 </style>
 
+<link rel="stylesheet" href="sidebar.css">
+
 </head>
 
 
@@ -1113,60 +1115,7 @@ td.particular {
      SIDEBAR
 ========================================= -->
 
-<div class="sidebar">
-
-<h2>
-T-SHIRT PLUG
-</h2>
-
-
-<a href="dashboard.php">
-🏠 Dashboard
-</a>
-
-
-<a href="add_product.php">
-➕ Add Clothing Product
-</a>
-
-
-<a href="reports.php">
-📊 Reports
-</a>
-
-<a href="records.php">
-📁 Saved Records
-</a>
-
-<a
-    href="payments.php"
-    class="active"
->
-💰 Payments
-</a>
- <a href="expenditures.php">
-
-        💸  Expenditures
-
-    </a>
-<a href="long_term_loans.php">
-💳 Long Term Loans
-</a>
-<a href="daily_report.php">
-    📅 Daily Report
-</a>
-
-<a href="logout.php">
-🚪 Logout
-</a>
-
-</div>
-
-
-
-<!-- =========================================
-     MAIN CONTENT
-========================================= -->
+<?php include "sidebar.php"; ?>
 
 <div class="main">
 
