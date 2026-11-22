@@ -79,53 +79,329 @@ if(isset($_POST['dashboard_password'])){
 // DASHBOARD STATISTICS
 // ==========================================
 
+$stats_period_input = $_GET['stats_period'] ?? 'day';
+$stats_start_input = $_GET['stats_start_date'] ?? date('Y-m-d');
+$stats_end_input = $_GET['stats_end_date'] ?? date('Y-m-d');
+$stats_period = is_string($stats_period_input) ? $stats_period_input : '';
+$stats_start_input = is_string($stats_start_input) ? trim($stats_start_input) : '';
+$stats_end_input = is_string($stats_end_input) ? trim($stats_end_input) : '';
+$stats_period_error = '';
+$stats_period_valid = true;
+$today = date('Y-m-d');
+$stats_start_date = $today;
+$stats_end_date = $today;
+$stats_period_label = 'Today';
+
+if ($stats_period === 'week') {
+    $stats_start_date = (new DateTimeImmutable('monday this week'))->format('Y-m-d');
+    $stats_period_label = 'This week';
+} elseif ($stats_period === 'month') {
+    $stats_start_date = date('Y-m-01');
+    $stats_period_label = 'This month';
+} elseif ($stats_period === 'custom') {
+    $start_parts = explode('-', $stats_start_input);
+    $end_parts = explode('-', $stats_end_input);
+    $valid_start = count($start_parts) === 3 &&
+        checkdate((int)$start_parts[1], (int)$start_parts[2], (int)$start_parts[0]) &&
+        preg_match('/^\d{4}-\d{2}-\d{2}$/', $stats_start_input);
+    $valid_end = count($end_parts) === 3 &&
+        checkdate((int)$end_parts[1], (int)$end_parts[2], (int)$end_parts[0]) &&
+        preg_match('/^\d{4}-\d{2}-\d{2}$/', $stats_end_input);
+
+    if (!$valid_start || !$valid_end || $stats_start_input > $stats_end_input) {
+        $stats_period_valid = false;
+        $stats_period_error = 'Choose a valid custom start and end date.';
+        $stats_period_label = 'Custom range';
+    } else {
+        $stats_start_date = $stats_start_input;
+        $stats_end_date = $stats_end_input;
+        $stats_period_label = date('M j, Y', strtotime($stats_start_date))
+            . ' - '
+            . date('M j, Y', strtotime($stats_end_date));
+    }
+} elseif ($stats_period !== 'day') {
+    $stats_period_valid = false;
+    $stats_period_error = 'Choose Day, Week, Month, or Custom.';
+}
+
 if($dashboard_unlocked){
 
-    // Total clothing items
+    $total_items = 0;
+    $total_revenue = 0.0;
+    $daily_report_cost = 0.0;
+    $business_expenditures = 0.0;
+    $total_expenses = 0.0;
+    $net_profit = 0.0;
 
-    $total_items = mysqli_fetch_assoc(
-        mysqli_query(
+    if ($stats_period_valid) {
+        $stats_stmt = mysqli_prepare(
             $conn,
-            "SELECT COUNT(*) total FROM products"
-        )
-    )['total'];
+            "SELECT
+                (SELECT COALESCE(SUM(quantity), 0)
+                 FROM products
+                 WHERE sale_date BETWEEN ? AND ?) AS total_items,
+                (SELECT COALESCE(SUM(total_sales), 0)
+                 FROM daily_reports
+                 WHERE report_date BETWEEN ? AND ?) AS total_revenue,
+                (SELECT COALESCE(SUM(total_cost), 0)
+                 FROM daily_reports
+                 WHERE report_date BETWEEN ? AND ?) AS daily_report_cost,
+                (SELECT COALESCE(SUM(amount), 0)
+                 FROM business_expenditures
+                 WHERE expenditure_date BETWEEN ? AND ?) AS business_expenditures"
+        );
 
+        if (!$stats_stmt) {
+            die("Could not prepare dashboard statistics: " . mysqli_error($conn));
+        }
 
-    // Total profit
+        mysqli_stmt_bind_param(
+            $stats_stmt,
+            "ssssssss",
+            $stats_start_date,
+            $stats_end_date,
+            $stats_start_date,
+            $stats_end_date,
+            $stats_start_date,
+            $stats_end_date,
+            $stats_start_date,
+            $stats_end_date
+        );
 
-    $total_profit = mysqli_fetch_assoc(
-        mysqli_query(
-            $conn,
-            "SELECT SUM(profit) total FROM products"
-        )
-    )['total'] ?? 0;
+        if (!mysqli_stmt_execute($stats_stmt)) {
+            die("Could not load dashboard statistics: " . mysqli_stmt_error($stats_stmt));
+        }
 
+        $stats = mysqli_fetch_assoc(mysqli_stmt_get_result($stats_stmt));
+        mysqli_stmt_close($stats_stmt);
+        if (!$stats) {
+            die("Could not load dashboard statistics.");
+        }
 
-    // Total loss
+        $total_items = (int)$stats['total_items'];
+        $total_revenue = (float)$stats['total_revenue'];
+        $daily_report_cost = (float)$stats['daily_report_cost'];
+        $business_expenditures = (float)$stats['business_expenditures'];
+        $total_expenses = $daily_report_cost + $business_expenditures;
+        $net_profit = $total_revenue - $total_expenses;
+    }
 
-    $total_loss = mysqli_fetch_assoc(
-        mysqli_query(
-            $conn,
-            "SELECT SUM(loss) total FROM products"
-        )
-    )['total'] ?? 0;
+}
 
+$chart_period_input = $_GET['chart_period'] ?? 'week';
+$chart_start_input = $_GET['chart_start_date'] ?? date('Y-m-d');
+$chart_end_input = $_GET['chart_end_date'] ?? date('Y-m-d');
+$chart_period = is_string($chart_period_input) ? $chart_period_input : '';
+$chart_start_input = is_string($chart_start_input) ? trim($chart_start_input) : '';
+$chart_end_input = is_string($chart_end_input) ? trim($chart_end_input) : '';
+$chart_period_valid = true;
+$chart_period_error = '';
+$chart_period_label = 'Last 12 weeks';
+$chart_start_date = (new DateTimeImmutable('monday this week'))->modify('-11 weeks')->format('Y-m-d');
+$chart_end_date = $today;
 
-    // Net profit
+if ($chart_period === 'month') {
+    $chart_start_date = (new DateTimeImmutable(date('Y-m-01')))->modify('-11 months')->format('Y-m-d');
+    $chart_period_label = 'Last 12 months';
+} elseif ($chart_period === 'custom') {
+    $chart_start_parts = explode('-', $chart_start_input);
+    $chart_end_parts = explode('-', $chart_end_input);
+    $valid_chart_start = count($chart_start_parts) === 3 &&
+        checkdate((int)$chart_start_parts[1], (int)$chart_start_parts[2], (int)$chart_start_parts[0]) &&
+        preg_match('/^\d{4}-\d{2}-\d{2}$/', $chart_start_input);
+    $valid_chart_end = count($chart_end_parts) === 3 &&
+        checkdate((int)$chart_end_parts[1], (int)$chart_end_parts[2], (int)$chart_end_parts[0]) &&
+        preg_match('/^\d{4}-\d{2}-\d{2}$/', $chart_end_input);
 
-    $net_profit = $total_profit - $total_loss;
+    if (!$valid_chart_start || !$valid_chart_end || $chart_start_input > $chart_end_input) {
+        $chart_period_valid = false;
+        $chart_period_error = 'Choose a valid custom chart start and end date.';
+        $chart_period_label = 'Custom range';
+    } else {
+        $chart_start_date = $chart_start_input;
+        $chart_end_date = $chart_end_input;
+        $chart_period_label = date('M j, Y', strtotime($chart_start_date))
+            . ' - '
+            . date('M j, Y', strtotime($chart_end_date));
+    }
+} elseif ($chart_period !== 'week') {
+    $chart_period_valid = false;
+    $chart_period_error = 'Choose Weekly, Monthly, or Custom for the chart.';
+}
 
+$chart_data = [];
+$chart_has_activity = false;
+$chart_granularity = $chart_period === 'week' ? 'week' : ($chart_period === 'month' ? 'month' : 'day');
+$chart_granularity_label = $chart_granularity === 'week'
+    ? 'Weekly'
+    : ($chart_granularity === 'month' ? 'Monthly' : 'Daily');
+$chart_start_object = null;
+$chart_end_object = null;
+$chart_svg_revenue_points = '';
+$chart_svg_cost_points = '';
+$chart_svg_ticks = [];
+$chart_svg_label_step = 1;
 
-    // Convert values to numbers
+if ($dashboard_unlocked && $chart_period_valid) {
+    $chart_start_object = new DateTimeImmutable($chart_start_date);
+    $chart_end_object = new DateTimeImmutable($chart_end_date);
+    $chart_span_days = (int)$chart_start_object->diff($chart_end_object)->days + 1;
 
-    $total_items = (int)$total_items;
+    if ($chart_period === 'custom' && $chart_span_days > 365) {
+        $chart_granularity = 'month';
+        $chart_granularity_label = 'Monthly';
+    } elseif ($chart_period === 'custom' && $chart_span_days > 31) {
+        $chart_granularity = 'week';
+        $chart_granularity_label = 'Weekly';
+    }
 
-    $total_profit = (float)$total_profit;
+    $chart_buckets = [];
+    $chart_bucket_indexes = [];
 
-    $total_loss = (float)$total_loss;
+    if ($chart_granularity === 'day') {
+        for ($date = $chart_start_object; $date <= $chart_end_object; $date = $date->modify('+1 day')) {
+            $key = $date->format('Y-m-d');
+            $chart_bucket_indexes[$key] = count($chart_buckets);
+            $chart_buckets[] = [
+                'key' => $key,
+                'label' => $date->format('M j'),
+                'revenue' => 0.0,
+                'cost' => 0.0
+            ];
+        }
+    } elseif ($chart_granularity === 'week') {
+        $bucket_index = 0;
+        for ($date = $chart_start_object; $date <= $chart_end_object; $date = $date->modify('+7 days')) {
+            $key = (string)$bucket_index;
+            $bucket_end = $date->modify('+6 days');
+            if ($bucket_end > $chart_end_object) {
+                $bucket_end = $chart_end_object;
+            }
+            $chart_bucket_indexes[$key] = count($chart_buckets);
+            $chart_buckets[] = [
+                'key' => $key,
+                'label' => $date->format('M j') . ' - ' . $bucket_end->format('M j'),
+                'revenue' => 0.0,
+                'cost' => 0.0
+            ];
+            $bucket_index++;
+        }
+    } else {
+        for ($date = $chart_start_object->modify('first day of this month');
+             $date <= $chart_end_object;
+             $date = $date->modify('+1 month')) {
+            $key = $date->format('Y-m');
+            $chart_bucket_indexes[$key] = count($chart_buckets);
+            $chart_buckets[] = [
+                'key' => $key,
+                'label' => $date->format('M Y'),
+                'revenue' => 0.0,
+                'cost' => 0.0
+            ];
+        }
+    }
 
-    $net_profit = (float)$net_profit;
+    $chart_stmt = mysqli_prepare(
+        $conn,
+        "SELECT activity_date,
+                SUM(revenue) AS revenue,
+                SUM(report_cost) AS report_cost,
+                SUM(expenditure) AS expenditure
+         FROM (
+            SELECT report_date AS activity_date,
+                   total_sales AS revenue,
+                   total_cost AS report_cost,
+                   0 AS expenditure
+            FROM daily_reports
+            WHERE report_date BETWEEN ? AND ?
+            UNION ALL
+            SELECT expenditure_date AS activity_date,
+                   0 AS revenue,
+                   0 AS report_cost,
+                   amount AS expenditure
+            FROM business_expenditures
+            WHERE expenditure_date BETWEEN ? AND ?
+         ) AS financial_activity
+         GROUP BY activity_date
+         ORDER BY activity_date"
+    );
 
+    if (!$chart_stmt) {
+        die("Could not prepare revenue and cost trend: " . mysqli_error($conn));
+    }
+
+    mysqli_stmt_bind_param(
+        $chart_stmt,
+        "ssss",
+        $chart_start_date,
+        $chart_end_date,
+        $chart_start_date,
+        $chart_end_date
+    );
+    if (!mysqli_stmt_execute($chart_stmt)) {
+        die("Could not load revenue and cost trend: " . mysqli_stmt_error($chart_stmt));
+    }
+
+    $chart_result = mysqli_stmt_get_result($chart_stmt);
+    while ($activity = mysqli_fetch_assoc($chart_result)) {
+        $activity_date = new DateTimeImmutable($activity['activity_date']);
+        if ($chart_granularity === 'week') {
+            $days_from_start = (int)$chart_start_object->diff($activity_date)->days;
+            $bucket_key = (string)intdiv($days_from_start, 7);
+        } elseif ($chart_granularity === 'month') {
+            $bucket_key = $activity_date->format('Y-m');
+        } else {
+            $bucket_key = $activity_date->format('Y-m-d');
+        }
+
+        if (!isset($chart_bucket_indexes[$bucket_key])) {
+            continue;
+        }
+        $bucket_index = $chart_bucket_indexes[$bucket_key];
+        $chart_buckets[$bucket_index]['revenue'] += (float)$activity['revenue'];
+        $chart_buckets[$bucket_index]['cost'] +=
+            (float)$activity['report_cost'] + (float)$activity['expenditure'];
+        $chart_has_activity = true;
+    }
+    mysqli_stmt_close($chart_stmt);
+
+    $chart_data = $chart_buckets;
+    if ($chart_data) {
+        $chart_max_value = 1.0;
+        foreach ($chart_data as $point) {
+            $chart_max_value = max($chart_max_value, (float)$point['revenue'], (float)$point['cost']);
+        }
+        $chart_max_value *= 1.1;
+        $chart_plot_left = 100;
+        $chart_plot_right = 740;
+        $chart_plot_top = 18;
+        $chart_plot_bottom = 258;
+        $chart_plot_width = $chart_plot_right - $chart_plot_left;
+        $chart_plot_height = $chart_plot_bottom - $chart_plot_top;
+
+        for ($tick = 0; $tick <= 4; $tick++) {
+            $ratio = $tick / 4;
+            $chart_svg_ticks[] = [
+                'y' => $chart_plot_top + $chart_plot_height * $ratio,
+                'label' => 'TSh ' . number_format($chart_max_value * (1 - $ratio))
+            ];
+        }
+
+        $chart_svg_label_step = max(1, (int)ceil(count($chart_data) / 6));
+        $revenue_coordinates = [];
+        $cost_coordinates = [];
+        foreach ($chart_data as $index => $point) {
+            $x = count($chart_data) === 1
+                ? $chart_plot_left + $chart_plot_width / 2
+                : $chart_plot_left + $chart_plot_width * $index / (count($chart_data) - 1);
+            $revenue_y = $chart_plot_bottom - $chart_plot_height * (float)$point['revenue'] / $chart_max_value;
+            $cost_y = $chart_plot_bottom - $chart_plot_height * (float)$point['cost'] / $chart_max_value;
+            $revenue_coordinates[] = round($x, 1) . ',' . round($revenue_y, 1);
+            $cost_coordinates[] = round($x, 1) . ',' . round($cost_y, 1);
+        }
+        $chart_svg_revenue_points = implode(' ', $revenue_coordinates);
+        $chart_svg_cost_points = implode(' ', $cost_coordinates);
+    }
 }
 
 ?>
@@ -447,6 +723,107 @@ body{
 
 }
 
+.stats-filter{
+
+    display:flex;
+
+    align-items:flex-end;
+
+    flex-wrap:wrap;
+
+    gap:12px;
+
+    padding:16px;
+
+    margin-bottom:18px;
+
+    background:#fff;
+
+    border-radius:12px;
+
+    box-shadow:0 4px 15px rgba(0,0,0,0.05);
+
+}
+
+.stats-filter label{
+
+    display:flex;
+
+    flex-direction:column;
+
+    gap:6px;
+
+    color:#44515f;
+
+    font-size:13px;
+
+    font-weight:600;
+
+}
+
+.stats-filter select,
+.stats-filter input{
+
+    min-width:170px;
+
+    padding:10px;
+
+    border:1px solid #cbd5e1;
+
+    border-radius:7px;
+
+    font:inherit;
+
+}
+
+.stats-filter-range{
+
+    display:flex;
+
+    flex-wrap:wrap;
+
+    gap:12px;
+
+}
+
+.stats-filter-range[hidden]{
+
+    display:none;
+
+}
+
+.stats-filter button{
+
+    padding:11px 18px;
+
+    border:0;
+
+    border-radius:7px;
+
+    background:#0d47a1;
+
+    color:#fff;
+
+    font-weight:600;
+
+    cursor:pointer;
+
+}
+
+.stats-filter-error{
+
+    padding:12px 14px;
+
+    margin-bottom:18px;
+
+    border-radius:8px;
+
+    background:#fff3cd;
+
+    color:#856404;
+
+}
+
 
 /* ==========================================
    DASHBOARD CARDS
@@ -493,14 +870,14 @@ body{
 }
 
 
-.card.profit-card{
+.card.revenue-card{
 
     border-top-color:#198754;
 
 }
 
 
-.card.loss-card{
+.card.expense-card{
 
     border-top-color:#dc3545;
 
@@ -537,14 +914,14 @@ body{
 }
 
 
-.profit-card .card-icon{
+.revenue-card .card-icon{
 
     background:#e4f5eb;
 
 }
 
 
-.loss-card .card-icon{
+.expense-card .card-icon{
 
     background:#fde8e8;
 
@@ -584,14 +961,14 @@ body{
 }
 
 
-.card.profit-card h1{
+.card.revenue-card h1{
 
     color:#198754;
 
 }
 
 
-.card.loss-card h1{
+.card.expense-card h1{
 
     color:#dc3545;
 
@@ -620,6 +997,21 @@ body{
    PROFIT INFORMATION
 ========================================== */
 
+.financial-overview-grid{
+
+    display:grid;
+
+    grid-template-columns:minmax(0,1.6fr) minmax(280px,1fr);
+
+    gap:18px;
+
+    align-items:start;
+
+    margin-bottom:30px;
+
+}
+
+.revenue-trend,
 .profit-information{
 
     background:white;
@@ -631,6 +1023,186 @@ body{
     margin-bottom:30px;
 
     box-shadow:0 4px 15px rgba(0,0,0,0.05);
+
+}
+
+.revenue-trend h3{
+
+    margin:0 0 15px;
+
+    font-size:16px;
+
+}
+
+.trend-filter{
+
+    display:flex;
+
+    align-items:flex-end;
+
+    flex-wrap:wrap;
+
+    gap:10px;
+
+    margin-bottom:12px;
+
+}
+
+.trend-filter label{
+
+    display:flex;
+
+    flex-direction:column;
+
+    gap:5px;
+
+    color:#596575;
+
+    font-size:12px;
+
+}
+
+.trend-filter select,
+.trend-filter input{
+
+    min-width:130px;
+
+    padding:8px;
+
+    border:1px solid #cbd5e1;
+
+    border-radius:6px;
+
+    font:inherit;
+
+}
+
+.trend-filter-range{
+
+    display:flex;
+
+    flex-wrap:wrap;
+
+    gap:10px;
+
+}
+
+.trend-filter-range[hidden]{
+
+    display:none;
+
+}
+
+.trend-filter button{
+
+    padding:9px 13px;
+
+    border:0;
+
+    border-radius:6px;
+
+    background:#0d47a1;
+
+    color:#fff;
+
+    font-weight:600;
+
+    cursor:pointer;
+
+}
+
+.trend-legend{
+
+    display:flex;
+
+    flex-wrap:wrap;
+
+    gap:16px;
+
+    margin:6px 0 10px;
+
+    color:#596575;
+
+    font-size:12px;
+
+}
+
+.trend-legend span{
+
+    display:inline-flex;
+
+    align-items:center;
+
+    gap:7px;
+
+}
+
+.trend-legend i{
+
+    width:18px;
+
+    height:3px;
+
+    border-radius:2px;
+
+    background:#0d47a1;
+
+}
+
+.trend-legend .cost-key{
+
+    background:#dc3545;
+
+}
+
+.trend-chart{
+
+    display:block;
+
+    width:100%;
+
+    height:auto;
+
+    overflow:visible;
+
+}
+
+.trend-chart text{
+
+    fill:#758195;
+
+    font-size:11px;
+
+    font-family:Arial, Helvetica, sans-serif;
+
+}
+
+.trend-chart circle{
+
+    cursor:help;
+
+}
+
+.trend-empty,
+.trend-error{
+
+    padding:20px 10px;
+
+    border-radius:8px;
+
+    background:#f4f7fb;
+
+    color:#667085;
+
+    font-size:13px;
+
+}
+
+.trend-error{
+
+    background:#fff3cd;
+
+    color:#856404;
 
 }
 
@@ -1028,6 +1600,12 @@ body{
 
     }
 
+    .financial-overview-grid{
+
+        grid-template-columns:1fr;
+
+    }
+
 }
 
 
@@ -1137,82 +1715,14 @@ body{
 
 </style>
 
+<link rel="stylesheet" href="sidebar.css">
+
 </head>
 
 <body>
 
 
-<!-- ==========================================
-     SIDEBAR
-========================================== -->
-
-<div class="sidebar">
-
-    <h2>T-SHIRTS PLUG</h2>
-
-    <div class="sidebar-subtitle">
-        BUSINESS MANAGEMENT SYSTEM
-    </div>
-
-
-    <a href="dashboard.php" class="active">
-        🏠 Dashboard
-    </a>
-
-
-    <a href="add_product.php">
-        ➕ Add Clothing Product
-    </a>
-
-
-    <a href="reports.php">
-        📊 Reports
-    </a>
-
-
-    <a href="records.php">
-        📁 Saved Records
-    </a>
-
-
-    <div class="sidebar-divider"></div>
-
-
-    <a href="payments.php">
-        💰 Payments
-    </a>
-
-
-    <a href="expenditures.php">
-        💸 Expenditures
-    </a>
-
-
-    <a href="long_term_loans.php">
-        💳 Long Term Loans
-    </a>
-
-
-    <a href="daily_report.php">
-        📅 Daily Report
-    </a>
-
-
-    <div class="sidebar-divider"></div>
-
-
-    <a href="logout.php">
-        🚪 Logout
-    </a>
-
-
-    <div class="sidebar-footer">
-        T-SHIRT PLUG MANAGEMENT SYSTEM
-        <br><br>
-        Version 2.0
-    </div>
-
-</div>
+<?php include "sidebar.php"; ?>
 
 
 
@@ -1264,7 +1774,7 @@ body{
             <p>
                 Welcome to T-Shirt Plug Business Management.
                 Securely access your business performance,
-                sales statistics and financial information.
+                clothing item totals and financial information.
             </p>
 
         </div>
@@ -1347,7 +1857,7 @@ body{
 
                 Your business statistics and financial
                 performance at a glance. Monitor your
-                clothing inventory, profit, losses and
+                clothing sales, profit, expenses and
                 overall business performance.
 
             </p>
@@ -1366,10 +1876,40 @@ body{
             <h2>📊 Financial Overview</h2>
 
             <span>
-                Overall business statistics
+                Selected period: <?php echo htmlspecialchars($stats_period_label); ?>
             </span>
 
         </div>
+
+        <form method="GET" class="stats-filter" id="stats-filter">
+            <input type="hidden" name="chart_period" value="<?php echo htmlspecialchars($chart_period); ?>">
+            <input type="hidden" name="chart_start_date" value="<?php echo htmlspecialchars($chart_start_input); ?>">
+            <input type="hidden" name="chart_end_date" value="<?php echo htmlspecialchars($chart_end_input); ?>">
+            <label for="stats-period">
+                Period
+                <select name="stats_period" id="stats-period">
+                    <option value="day" <?php echo $stats_period === 'day' ? 'selected' : ''; ?>>Today</option>
+                    <option value="week" <?php echo $stats_period === 'week' ? 'selected' : ''; ?>>This week</option>
+                    <option value="month" <?php echo $stats_period === 'month' ? 'selected' : ''; ?>>This month</option>
+                    <option value="custom" <?php echo $stats_period === 'custom' ? 'selected' : ''; ?>>Custom range</option>
+                </select>
+            </label>
+            <div class="stats-filter-range" id="stats-custom-range" <?php echo $stats_period === 'custom' ? '' : 'hidden'; ?>>
+                <label for="stats-start-date">
+                    Start date
+                    <input type="date" name="stats_start_date" id="stats-start-date" value="<?php echo htmlspecialchars($stats_start_input); ?>" <?php echo $stats_period === 'custom' ? 'required' : ''; ?>>
+                </label>
+                <label for="stats-end-date">
+                    End date
+                    <input type="date" name="stats_end_date" id="stats-end-date" value="<?php echo htmlspecialchars($stats_end_input); ?>" <?php echo $stats_period === 'custom' ? 'required' : ''; ?>>
+                </label>
+            </div>
+            <button type="submit">Apply Filter</button>
+        </form>
+
+        <?php if ($stats_period_error !== ''): ?>
+            <div class="stats-filter-error" role="alert"><?php echo htmlspecialchars($stats_period_error); ?> Statistics are not shown until the period is corrected.</div>
+        <?php endif; ?>
 
 
         <div class="cards">
@@ -1386,11 +1926,11 @@ body{
                 <h3>Total Clothing Items</h3>
 
                 <h1>
-                    <?php echo number_format($total_items); ?>
+                    <?php echo $stats_period_valid ? number_format($total_items) : '—'; ?>
                 </h1>
 
                 <div class="card-description">
-                    Total saved product records
+                    Pieces sold in Store Records for this period
                 </div>
 
             </div>
@@ -1399,42 +1939,42 @@ body{
 
             <!-- TOTAL PROFIT -->
 
-            <div class="card profit-card">
+            <div class="card revenue-card">
 
                 <div class="card-icon">
                     📈
                 </div>
 
-                <h3>Total Profit</h3>
+                <h3>Total Revenue</h3>
 
                 <h1>
-                    TSh <?php echo number_format($total_profit); ?>
+                    <?php echo $stats_period_valid ? 'TSh ' . number_format($total_revenue) : '—'; ?>
                 </h1>
 
                 <div class="card-description">
-                    Total recorded profit
+                    Total sales recorded in Daily Report
                 </div>
 
             </div>
 
 
 
-            <!-- TOTAL LOSS -->
+            <!-- TOTAL EXPENSES -->
 
-            <div class="card loss-card">
+            <div class="card expense-card">
 
                 <div class="card-icon">
                     📉
                 </div>
 
-                <h3>Total Loss</h3>
+                <h3>Total Expenses</h3>
 
                 <h1>
-                    TSh <?php echo number_format($total_loss); ?>
+                    <?php echo $stats_period_valid ? 'TSh ' . number_format($total_expenses) : '—'; ?>
                 </h1>
 
                 <div class="card-description">
-                    Total recorded loss
+                    Daily Report costs plus recorded expenditures
                 </div>
 
             </div>
@@ -1452,11 +1992,11 @@ body{
                 <h3>Net Profit</h3>
 
                 <h1>
-                    TSh <?php echo number_format($net_profit); ?>
+                    <?php echo $stats_period_valid ? 'TSh ' . number_format($net_profit) : '—'; ?>
                 </h1>
 
                 <div class="card-description">
-                    Profit minus recorded losses
+                    Revenue minus Daily Report costs and expenditures
                 </div>
 
             </div>
@@ -1466,53 +2006,100 @@ body{
 
 
 
-        <!-- ==========================================
-             PROFIT INFORMATION
-        =========================================== -->
+        <div class="financial-overview-grid">
+            <section class="revenue-trend" aria-labelledby="revenue-trend-title">
+                <h3 id="revenue-trend-title">Revenue and Total Cost Trend</h3>
+                <form method="GET" class="trend-filter" id="trend-filter">
+                    <input type="hidden" name="stats_period" value="<?php echo htmlspecialchars($stats_period); ?>">
+                    <input type="hidden" name="stats_start_date" value="<?php echo htmlspecialchars($stats_start_input); ?>">
+                    <input type="hidden" name="stats_end_date" value="<?php echo htmlspecialchars($stats_end_input); ?>">
+                    <label for="chart-period">
+                        Chart period
+                        <select name="chart_period" id="chart-period">
+                            <option value="week" <?php echo $chart_period === 'week' ? 'selected' : ''; ?>>Weekly (last 12 weeks)</option>
+                            <option value="month" <?php echo $chart_period === 'month' ? 'selected' : ''; ?>>Monthly (last 12 months)</option>
+                            <option value="custom" <?php echo $chart_period === 'custom' ? 'selected' : ''; ?>>Custom range</option>
+                        </select>
+                    </label>
+                    <div class="trend-filter-range" id="chart-custom-range" <?php echo $chart_period === 'custom' ? '' : 'hidden'; ?>>
+                        <label for="chart-start-date">
+                            Start date
+                            <input type="date" name="chart_start_date" id="chart-start-date" value="<?php echo htmlspecialchars($chart_start_input); ?>" <?php echo $chart_period === 'custom' ? 'required' : ''; ?>>
+                        </label>
+                        <label for="chart-end-date">
+                            End date
+                            <input type="date" name="chart_end_date" id="chart-end-date" value="<?php echo htmlspecialchars($chart_end_input); ?>" <?php echo $chart_period === 'custom' ? 'required' : ''; ?>>
+                        </label>
+                    </div>
+                    <button type="submit">Update Chart</button>
+                </form>
 
+                <div class="section-heading">
+                    <span><?php echo htmlspecialchars($chart_period_label); ?> · <?php echo htmlspecialchars($chart_granularity_label); ?> trend</span>
+                </div>
 
-        <div class="profit-information">
+                <?php if ($chart_period_error !== ''): ?>
+                    <div class="trend-error" role="alert"><?php echo htmlspecialchars($chart_period_error); ?></div>
+                <?php elseif (!$chart_has_activity): ?>
+                    <div class="trend-empty">No revenue or expense records were found for this chart period.</div>
+                <?php else: ?>
+                    <div class="trend-legend" aria-hidden="true">
+                        <span><i></i>Revenue</span>
+                        <span><i class="cost-key"></i>Total Cost</span>
+                    </div>
+                    <svg class="trend-chart" viewBox="0 0 760 310" role="img" aria-label="Revenue and total cost trend for <?php echo htmlspecialchars($chart_period_label); ?>">
+                        <title>Revenue and total cost trend</title>
+                        <?php foreach ($chart_svg_ticks as $tick): ?>
+                            <line x1="100" y1="<?php echo round($tick['y'], 1); ?>" x2="740" y2="<?php echo round($tick['y'], 1); ?>" stroke="#e7ecf2" stroke-width="1" />
+                            <text x="92" y="<?php echo round($tick['y'] + 4, 1); ?>" text-anchor="end"><?php echo htmlspecialchars($tick['label']); ?></text>
+                        <?php endforeach; ?>
+                        <polyline points="<?php echo htmlspecialchars($chart_svg_revenue_points, ENT_QUOTES); ?>" fill="none" stroke="#0d47a1" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+                        <polyline points="<?php echo htmlspecialchars($chart_svg_cost_points, ENT_QUOTES); ?>" fill="none" stroke="#dc3545" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+                        <?php foreach ($chart_data as $index => $point): ?>
+                            <?php
+                            $x = count($chart_data) === 1
+                                ? 420
+                                : 100 + 640 * $index / (count($chart_data) - 1);
+                            $revenue_y = 258 - 240 * (float)$point['revenue'] / $chart_max_value;
+                            $cost_y = 258 - 240 * (float)$point['cost'] / $chart_max_value;
+                            ?>
+                            <circle cx="<?php echo round($x, 1); ?>" cy="<?php echo round($revenue_y, 1); ?>" r="4" fill="#0d47a1" tabindex="0">
+                                <title><?php echo htmlspecialchars($point['label'] . ' | Revenue: TSh ' . number_format((float)$point['revenue']) . ' | Total Cost: TSh ' . number_format((float)$point['cost']), ENT_QUOTES); ?></title>
+                            </circle>
+                            <circle cx="<?php echo round($x, 1); ?>" cy="<?php echo round($cost_y, 1); ?>" r="4" fill="#dc3545" tabindex="0">
+                                <title><?php echo htmlspecialchars($point['label'] . ' | Revenue: TSh ' . number_format((float)$point['revenue']) . ' | Total Cost: TSh ' . number_format((float)$point['cost']), ENT_QUOTES); ?></title>
+                            </circle>
+                            <?php if ($index % $chart_svg_label_step === 0 || $index === count($chart_data) - 1): ?>
+                                <text x="<?php echo round($x, 1); ?>" y="286" text-anchor="middle"><?php echo htmlspecialchars($point['label']); ?></text>
+                            <?php endif; ?>
+                        <?php endforeach; ?>
+                    </svg>
+                <?php endif; ?>
+            </section>
 
-            <h3>💼 Financial Breakdown</h3>
-
-
-            <div class="profit-line">
-
-                <span>Total Profit</span>
-
-                <strong>
-                    TSh <?php echo number_format($total_profit); ?>
-                </strong>
-
+            <div class="profit-information">
+                <h3>💼 Financial Breakdown</h3>
+                <div class="profit-line">
+                    <span>Total Revenue</span>
+                    <strong><?php echo $stats_period_valid ? 'TSh ' . number_format($total_revenue) : '—'; ?></strong>
+                </div>
+                <div class="profit-line">
+                    <span>Daily Report Total Cost</span>
+                    <strong><?php echo $stats_period_valid ? 'TSh ' . number_format($daily_report_cost) : '—'; ?></strong>
+                </div>
+                <div class="profit-line">
+                    <span>Business Expenditures</span>
+                    <strong><?php echo $stats_period_valid ? 'TSh ' . number_format($business_expenditures) : '—'; ?></strong>
+                </div>
+                <div class="profit-line">
+                    <span>Total Expenses</span>
+                    <strong style="color:#dc3545;"><?php echo $stats_period_valid ? 'TSh ' . number_format($total_expenses) : '—'; ?></strong>
+                </div>
+                <div class="profit-line">
+                    <span><strong>Net Profit</strong></span>
+                    <strong style="color:#198754;"><?php echo $stats_period_valid ? 'TSh ' . number_format($net_profit) : '—'; ?></strong>
+                </div>
             </div>
-
-
-            <div class="profit-line">
-
-                <span>Total Loss</span>
-
-                <strong style="color:#dc3545;">
-
-                    TSh <?php echo number_format($total_loss); ?>
-
-                </strong>
-
-            </div>
-
-
-            <div class="profit-line">
-
-                <span><strong>Net Profit</strong></span>
-
-                <strong style="color:#198754;">
-
-                    TSh <?php echo number_format($net_profit); ?>
-
-                </strong>
-
-            </div>
-
-
         </div>
 
 
@@ -1561,7 +2148,7 @@ body{
                         📁
                     </div>
 
-                    <h3>Saved Records</h3>
+                    <h3>Store Records</h3>
 
                     <p>
                         View, search and manage saved clothing records.
@@ -1699,6 +2286,37 @@ body{
 
 </div>
 
+
+<script>
+const statsPeriodSelect = document.getElementById('stats-period');
+const statsCustomRange = document.getElementById('stats-custom-range');
+if (statsPeriodSelect && statsCustomRange) {
+    const customDateInputs = statsCustomRange.querySelectorAll('input[type="date"]');
+    const updateCustomDateVisibility = function () {
+        const isCustom = statsPeriodSelect.value === 'custom';
+        statsCustomRange.hidden = !isCustom;
+        customDateInputs.forEach(function (input) {
+            input.required = isCustom;
+        });
+    };
+    statsPeriodSelect.addEventListener('change', updateCustomDateVisibility);
+    updateCustomDateVisibility();
+}
+const chartPeriodSelect = document.getElementById('chart-period');
+const chartCustomRange = document.getElementById('chart-custom-range');
+if (chartPeriodSelect && chartCustomRange) {
+    const chartDateInputs = chartCustomRange.querySelectorAll('input[type="date"]');
+    const updateChartDateVisibility = function () {
+        const isCustom = chartPeriodSelect.value === 'custom';
+        chartCustomRange.hidden = !isCustom;
+        chartDateInputs.forEach(function (input) {
+            input.required = isCustom;
+        });
+    };
+    chartPeriodSelect.addEventListener('change', updateChartDateVisibility);
+    updateChartDateVisibility();
+}
+</script>
 
 </body>
 
