@@ -355,16 +355,99 @@ if (isset($_POST['take'])) {
 $search =
     trim($_GET['search'] ?? '');
 
+$page_size = 10;
 
 if ($search !== '') {
 
     $like =
         "%" . $search . "%";
 
+    $count_stmt = mysqli_prepare(
+        $conn,
+        "SELECT COUNT(*)
+         FROM products
+         WHERE
+            date_received IS NOT NULL
+            AND sale_date IS NULL
+            AND
+            (
+                product_name LIKE ?
+                OR category LIKE ?
+                OR brand LIKE ?
+                OR size LIKE ?
+                OR color LIKE ?
+                OR person_name LIKE ?
+                OR date_received LIKE ?
+            )"
+    );
+
+
+    if (!$count_stmt) {
+
+        die(
+            "Search count query failed: "
+            . mysqli_error($conn)
+        );
+    }
+
+
+    mysqli_stmt_bind_param(
+        $count_stmt,
+        "sssssss",
+        $like,
+        $like,
+        $like,
+        $like,
+        $like,
+        $like,
+        $like
+    );
+
+    if (!mysqli_stmt_execute($count_stmt)) {
+
+        die(
+            "Search count query failed: "
+            . mysqli_stmt_error($count_stmt)
+        );
+
+    }
+
+    mysqli_stmt_bind_result($count_stmt, $total_records);
+    mysqli_stmt_fetch($count_stmt);
+    $total_records = (int)$total_records;
+    mysqli_stmt_close($count_stmt);
+
+} else {
+
+    $count_result = mysqli_query(
+        $conn,
+        "SELECT COUNT(*)
+         FROM products
+         WHERE
+            date_received IS NOT NULL
+            AND sale_date IS NULL"
+    );
+
+    if (!$count_result) {
+        die("Could not count received inventory: " . mysqli_error($conn));
+    }
+
+    $count_row = mysqli_fetch_row($count_result);
+    $total_records = (int)$count_row[0];
+
+}
+
+$total_pages = max(1, (int)ceil($total_records / $page_size));
+$page_input = isset($_GET['page']) && is_string($_GET['page'])
+    ? (int)$_GET['page']
+    : 1;
+$page = min(max(1, $page_input), $total_pages);
+$offset = ($page - 1) * $page_size;
+
+if ($search !== '') {
 
     $stmt = mysqli_prepare(
         $conn,
-
         "SELECT
             id,
             product_name,
@@ -393,43 +476,44 @@ if ($search !== '') {
             )
          ORDER BY
             date_received DESC,
-            id DESC"
+            id DESC
+         LIMIT ? OFFSET ?"
     );
 
-
     if (!$stmt) {
-
-        die(
-            "Search query failed: "
-            . mysqli_error($conn)
-        );
+        die("Search query failed: " . mysqli_error($conn));
     }
-
 
     mysqli_stmt_bind_param(
         $stmt,
-        "sssssss",
+        "sssssssii",
         $like,
         $like,
         $like,
         $like,
         $like,
         $like,
-        $like
+        $like,
+        $page_size,
+        $offset
     );
 
+    if (!mysqli_stmt_execute($stmt)) {
+        die("Search query failed: " . mysqli_stmt_error($stmt));
+    }
 
-    mysqli_stmt_execute($stmt);
+    $records = mysqli_stmt_get_result($stmt);
 
+    if (!$records) {
+        die("Could not load matching inventory: " . mysqli_stmt_error($stmt));
+    }
 
-    $records =
-        mysqli_stmt_get_result($stmt);
+    mysqli_stmt_close($stmt);
 
 } else {
 
     $records = mysqli_query(
         $conn,
-
         "SELECT
             id,
             product_name,
@@ -448,9 +532,24 @@ if ($search !== '') {
             AND sale_date IS NULL
          ORDER BY
             date_received DESC,
-            id DESC"
+            id DESC
+         LIMIT $page_size OFFSET $offset"
     );
+
 }
+
+if (!$records) {
+    die("Could not load received inventory: " . mysqli_error($conn));
+}
+
+$previous_page_url = 'reports.php?' . http_build_query([
+    'search' => $search,
+    'page' => max(1, $page - 1)
+]);
+$next_page_url = 'reports.php?' . http_build_query([
+    'search' => $search,
+    'page' => min($total_pages, $page + 1)
+]);
 
 ?>
 
@@ -821,6 +920,54 @@ tbody tr:hover {
     background: #eef4ff;
 }
 
+.pagination {
+
+    display: flex;
+
+    justify-content: space-between;
+
+    align-items: center;
+
+    gap: 12px;
+
+    margin-top: 16px;
+}
+
+
+.pagination a,
+.pagination span {
+
+    display: inline-block;
+
+    padding: 8px 12px;
+
+    border-radius: 5px;
+}
+
+
+.pagination a {
+
+    background: #0d47a1;
+
+    color: white;
+
+    text-decoration: none;
+}
+
+
+.pagination a:hover {
+
+    background: #1565c0;
+}
+
+
+.pagination .disabled {
+
+    background: #e9ecef;
+
+    color: #777;
+}
+
 
 /* =====================================================
    TAKE FORM
@@ -994,6 +1141,8 @@ tbody tr:hover {
 
 </style>
 
+<link rel="stylesheet" href="sidebar.css">
+
 </head>
 
 
@@ -1004,63 +1153,7 @@ tbody tr:hover {
      SIDEBAR
 ===================================================== -->
 
-<div class="sidebar">
-
-    <h2>
-        T-SHIRT PLUG
-    </h2>
-
-
-    <a href="dashboard.php">
-        🏠 Dashboard
-    </a>
-
-
-    <a href="add_product.php">
-        ➕ Add Clothing Product
-    </a>
-
-
-    <a
-        href="reports.php"
-        class="active"
-    >
-        📊 Received Clothes
-    </a>
-
-
-    <a href="records.php">
-        📁 Saved Records
-    </a>
-
-
-    <a href="payments.php">
-        💰 Payments
-    </a>
- <a href="expenditures.php">
-
-        💸 Expenditures
-
-    </a>
-
-    <a href="long_term_loans.php">
-        💳 Long Term Loans
-    </a>
-    <a href="daily_report.php">
-    📅 Daily Report
-</a>
-
-
-    <a href="logout.php">
-        🚪 Logout
-    </a>
-
-</div>
-
-
-<!-- =====================================================
-     MAIN CONTENT
-===================================================== -->
+<?php include "sidebar.php"; ?>
 
 <div class="main">
 
@@ -1238,9 +1331,6 @@ tbody tr:hover {
 
                         <th>Brand</th>
 
-                        <th>Size</th>
-
-                        <th>Color</th>
 
                         <th>Available</th>
 
@@ -1298,19 +1388,6 @@ tbody tr:hover {
                                 ) ?>
                             </td>
 
-
-                            <td>
-                                <?= htmlspecialchars(
-                                    $row['size']
-                                ) ?>
-                            </td>
-
-
-                            <td>
-                                <?= htmlspecialchars(
-                                    $row['color']
-                                ) ?>
-                            </td>
 
 
                             <td>
@@ -1491,6 +1568,33 @@ tbody tr:hover {
             </table>
 
         </div>
+
+        <?php if ($total_records > 0): ?>
+
+            <nav class="pagination" aria-label="Received inventory pages">
+
+                <span>
+                    Showing <?= $offset + 1 ?>–<?= min($offset + $page_size, $total_records) ?>
+                    of <?= $total_records ?> records
+                </span>
+
+                <div>
+                    <?php if ($page > 1): ?>
+                        <a href="<?= htmlspecialchars($previous_page_url) ?>">Previous</a>
+                    <?php else: ?>
+                        <span class="disabled">Previous</span>
+                    <?php endif; ?>
+
+                    <?php if ($page < $total_pages): ?>
+                        <a href="<?= htmlspecialchars($next_page_url) ?>">Next</a>
+                    <?php else: ?>
+                        <span class="disabled">Next</span>
+                    <?php endif; ?>
+                </div>
+
+            </nav>
+
+        <?php endif; ?>
 
     </div>
 
