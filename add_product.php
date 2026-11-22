@@ -366,51 +366,13 @@ select:focus {
 
 </style>
 
+<link rel="stylesheet" href="sidebar.css">
+
 </head>
 
 <body>
 
-<div class="sidebar">
-
-<h2>
-T-SHIRT PLUG
-</h2>
-
-<a href="dashboard.php">
-🏠 Dashboard
-</a>
-
-<a href="add_product.php" class="active">
-➕ Add Clothing Product
-</a>
-
-<a href="reports.php">
-📊 Reports
-</a>
-
-<a href="payments.php">
-💰 Payments
-</a>
-<a href="expenditures.php">
-💸 Expenditures.php
-</a>
-<a href="long_term_loans.php">
-💳 Long Term Loans
-</a>
-
-<a href="records.php">
-📁 Saved Records 
-</a>
-<a href="daily_report.php">
-    📅 Daily Report
-</a>
-
-
-<a href="logout.php">
-🚪 Logout
-</a>
-
-</div>
+<?php include "sidebar.php"; ?>
 
 <div class="main">
 
@@ -526,52 +488,6 @@ Brand
 >
 
 </div>
-
-<!-- 
-<div class="form-group">
-
-<label>
-Size
-</label>
-
-<select
-    name="size"
->
-
-<option value="">
-Select Size
-</option>
-
-<option value="S">S</option>
-
-<option value="M">M</option>
-
-<option value="L">L</option>
-
-<option value="XL">XL</option>
-
-<option value="XXL">XXL</option>
-
-<option value="ALL">ALL</option>
-
-</select>
-
-</div>
-
-
-<div class="form-group">
-
-<label>
-Color
-</label>
-
-<input
-    type="text"
-    name="color"
-    placeholder="Example: Black"
->
-
-</div> -->
 
 
 <div class="form-group">

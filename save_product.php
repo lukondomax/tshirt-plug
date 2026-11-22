@@ -99,8 +99,14 @@ if(mysqli_query($conn,$sql)){
 
 $_SESSION['message']="Clothing item saved successfully!";
 
+$redirect_to = (
+    isset($_POST['return_to'])
+    && $_POST['return_to'] === 'records'
+)
+    ? "records.php"
+    : "dashboard.php";
 
-header("Location: dashboard.php");
+header("Location: " . $redirect_to);
 
 exit();
 
