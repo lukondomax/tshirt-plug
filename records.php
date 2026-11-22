@@ -19,7 +19,7 @@ $search = trim($_GET['search'] ?? '');
 
 
 // ==========================================
-// EXPORT TO EXCEL OR PDF
+// EXPORT TO CSV OR PDF
 // ==========================================
 
 $export = $_GET['export'] ?? '';
@@ -34,8 +34,9 @@ function getProductRecords($conn, $search) {
         $stmt = mysqli_prepare(
             $conn,
             "SELECT * FROM products
-             WHERE category LIKE ?
-             ORDER BY id DESC"
+             WHERE sale_date IS NOT NULL
+             AND category LIKE ?
+             ORDER BY sale_date DESC, id DESC"
         );
 
         $like = "%" . $search . "%";
@@ -55,17 +56,18 @@ function getProductRecords($conn, $search) {
         return mysqli_query(
             $conn,
             "SELECT * FROM products
-             ORDER BY id DESC"
+             WHERE sale_date IS NOT NULL
+             ORDER BY sale_date DESC, id DESC"
         );
     }
 }
 
 
 // ==========================================
-// EXPORT TO EXCEL
+// EXPORT TO CSV
 // ==========================================
 
-if ($export === 'excel') {
+if ($export === 'csv') {
 
     $export_records = getProductRecords(
         $conn,
@@ -76,12 +78,18 @@ if ($export === 'excel') {
         die("Unable to export records.");
     }
 
+    $output = fopen('php://output', 'w');
+
+    if ($output === false) {
+        die("Unable to create CSV export.");
+    }
+
     header(
-        "Content-Type: application/vnd.ms-excel; charset=UTF-8"
+        "Content-Type: text/csv; charset=UTF-8"
     );
 
     header(
-        "Content-Disposition: attachment; filename=sales_records.xls"
+        "Content-Disposition: attachment; filename=sales_records.csv"
     );
 
     header("Pragma: no-cache");
@@ -90,7 +98,18 @@ if ($export === 'excel') {
     echo "\xEF\xBB\xBF";
 
 
-    echo "Product\tPerson Name\tBrand\tSize\tColor\tQuantity\tBuying Price\tSelling Price\tProfit\tLoss\tNet Profit\tDate\n";
+    fputcsv($output, [
+        'Product',
+        'Person Name',
+        'Brand',
+        'Quantity',
+        'Buying Price',
+        'Selling Price',
+        'Profit',
+        'Loss',
+        'Net Profit',
+        'Date'
+    ]);
 
 
     while ($row = mysqli_fetch_assoc($export_records)) {
@@ -100,8 +119,6 @@ if ($export === 'excel') {
             $row['product_name'],
             $row['category'],
             $row['brand'],
-            // $row['size'],
-            // $row['color'],
             $row['quantity'],
             $row['buying_price'],
             $row['selling_price'],
@@ -128,21 +145,16 @@ if ($export === 'excel') {
                 $value
             );
 
-            $value = str_replace(
-                '"',
-                '""',
-                $value
-            );
-
-            return '"' . $value . '"';
+            return $value;
 
         }, $values);
 
 
-        echo implode("\t", $values) . "\n";
+        fputcsv($output, $values);
 
     }
 
+    fclose($output);
     exit();
 }
 
@@ -452,14 +464,124 @@ if ($export === 'pdf') {
 // NORMAL RECORD DISPLAY
 // ==========================================
 
-$records = getProductRecords(
-    $conn,
-    $search
-);
+$page_size = 10;
+
+if ($search !== '') {
+
+    $like = '%' . $search . '%';
+    $count_stmt = mysqli_prepare(
+        $conn,
+        "SELECT COUNT(*)
+         FROM products
+         WHERE sale_date IS NOT NULL
+         AND category LIKE ?"
+    );
+
+    if (!$count_stmt) {
+        die("Unable to count matching records: " . mysqli_error($conn));
+    }
+
+    mysqli_stmt_bind_param($count_stmt, "s", $like);
+
+} else {
+
+    $count_stmt = mysqli_prepare(
+        $conn,
+        "SELECT COUNT(*)
+         FROM products
+         WHERE sale_date IS NOT NULL"
+    );
+
+    if (!$count_stmt) {
+        die("Unable to count records: " . mysqli_error($conn));
+    }
+
+}
+
+if (!mysqli_stmt_execute($count_stmt)) {
+    die("Unable to count records: " . mysqli_stmt_error($count_stmt));
+}
+
+mysqli_stmt_bind_result($count_stmt, $total_records);
+mysqli_stmt_fetch($count_stmt);
+$total_records = (int)$total_records;
+mysqli_stmt_close($count_stmt);
+
+$total_pages = max(1, (int)ceil($total_records / $page_size));
+$page_input = isset($_GET['page']) && is_string($_GET['page'])
+    ? (int)$_GET['page']
+    : 1;
+$page = min(max(1, $page_input), $total_pages);
+$offset = ($page - 1) * $page_size;
+
+if ($search !== '') {
+
+    $records_stmt = mysqli_prepare(
+        $conn,
+        "SELECT *
+         FROM products
+         WHERE sale_date IS NOT NULL
+         AND category LIKE ?
+         ORDER BY sale_date DESC, id DESC
+         LIMIT ? OFFSET ?"
+    );
+
+    if (!$records_stmt) {
+        die("Unable to prepare matching records: " . mysqli_error($conn));
+    }
+
+    mysqli_stmt_bind_param(
+        $records_stmt,
+        "sii",
+        $like,
+        $page_size,
+        $offset
+    );
+
+} else {
+
+    $records_stmt = mysqli_prepare(
+        $conn,
+        "SELECT *
+         FROM products
+         WHERE sale_date IS NOT NULL
+         ORDER BY sale_date DESC, id DESC
+         LIMIT ? OFFSET ?"
+    );
+
+    if (!$records_stmt) {
+        die("Unable to prepare records: " . mysqli_error($conn));
+    }
+
+    mysqli_stmt_bind_param(
+        $records_stmt,
+        "ii",
+        $page_size,
+        $offset
+    );
+
+}
+
+if (!mysqli_stmt_execute($records_stmt)) {
+    die("Unable to retrieve records: " . mysqli_stmt_error($records_stmt));
+}
+
+$records = mysqli_stmt_get_result($records_stmt);
 
 if (!$records) {
-    die("Unable to retrieve product records.");
+    die("Unable to retrieve records: " . mysqli_stmt_error($records_stmt));
 }
+
+mysqli_stmt_close($records_stmt);
+
+$previous_page_url = 'records.php?' . http_build_query([
+    'search' => $search,
+    'page' => max(1, $page - 1)
+]);
+$next_page_url = 'records.php?' . http_build_query([
+    'search' => $search,
+    'page' => min($total_pages, $page + 1)
+]);
 
 ?>
 
@@ -519,6 +641,15 @@ body {
 .sidebar a:hover {
     background: #1565c0;
 }
+.sidebar a.active {
+
+    background: #1565c0;
+
+    font-weight: bold;
+
+    border-left: 5px solid white;
+
+}
 
 
 /* MAIN */
@@ -537,6 +668,136 @@ body {
     border-radius: 15px;
     box-shadow: 0 5px 15px #ddd;
     overflow-x: auto;
+}
+
+.records-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 18px;
+}
+
+.records-header h2 {
+    margin: 0;
+}
+
+.add-product-button {
+    padding: 10px 16px;
+    border: none;
+    border-radius: 6px;
+    background: #198754;
+    color: white;
+    cursor: pointer;
+    font-weight: bold;
+    white-space: nowrap;
+}
+
+.add-product-button:hover {
+    background: #146c43;
+}
+
+.flash-success {
+    margin-bottom: 18px;
+    padding: 12px 16px;
+    border-radius: 6px;
+    background: #d1e7dd;
+    color: #0f5132;
+}
+
+.product-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    overflow-y: auto;
+    background: rgba(0, 0, 0, 0.55);
+}
+
+.product-modal-backdrop[hidden] {
+    display: none;
+}
+
+.product-modal {
+    width: 100%;
+    max-width: 720px;
+    max-height: 90vh;
+    overflow-y: auto;
+    padding: 24px;
+    border-radius: 12px;
+    background: white;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+
+.product-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 18px;
+}
+
+.product-modal-header h2 {
+    margin: 0;
+}
+
+.product-modal-close {
+    padding: 4px 10px;
+    background: transparent;
+    color: #555;
+    font-size: 28px;
+    line-height: 1;
+}
+
+.product-modal-close:hover {
+    background: #f0f0f0;
+}
+
+.product-form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+}
+
+.product-form .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.product-form label {
+    font-weight: bold;
+}
+
+.product-form input {
+    width: 100%;
+    padding: 11px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+}
+
+.product-form-actions {
+    display: flex;
+    grid-column: 1 / -1;
+    gap: 10px;
+    justify-content: flex-end;
+}
+
+.product-form-actions button[type="submit"] {
+    background: #0d47a1;
+    color: white;
+}
+
+.product-form-cancel {
+    background: #e9ecef;
+    color: #333;
+}
+
+body.modal-open {
+    overflow: hidden;
 }
 
 
@@ -582,7 +843,7 @@ button {
     color: white;
 }
 
-.excel-btn {
+.csv-btn {
     display: inline-block;
     background: #198754;
     color: white;
@@ -602,7 +863,7 @@ button {
     font-weight: bold;
 }
 
-.excel-btn:hover {
+.csv-btn:hover {
     background: #146c43;
 }
 
@@ -630,6 +891,36 @@ td, th {
     padding: 10px;
     border: 1px solid #ddd;
     text-align: center;
+}
+
+.pagination {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-top: 16px;
+}
+
+.pagination a,
+.pagination span {
+    display: inline-block;
+    padding: 8px 12px;
+    border-radius: 5px;
+}
+
+.pagination a {
+    background: #0d47a1;
+    color: white;
+    text-decoration: none;
+}
+
+.pagination a:hover {
+    background: #1565c0;
+}
+
+.pagination .disabled {
+    background: #e9ecef;
+    color: #777;
 }
 
 .profit {
@@ -705,9 +996,25 @@ td, th {
         width: 100%;
     }
 
+    .records-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .product-form {
+        grid-template-columns: 1fr;
+    }
+
+    .product-form-actions {
+        grid-column: auto;
+        flex-direction: column;
+    }
+
 }
 
 </style>
+
+<link rel="stylesheet" href="sidebar.css">
 
 </head>
 
@@ -717,41 +1024,19 @@ td, th {
 
 <!-- SIDEBAR -->
 
-<div class="sidebar">
-
-<h2>T-SHIRT PLUG</h2>
-
-<a href="dashboard.php">🏠 Dashboard</a>
-
-<a href="add_product.php">➕ Add Clothing Product</a>
-
-<a href="reports.php">📊 Reports</a>
-
-<a href="records.php">📁 Saved Records</a>
-
-<a href="payments.php">💰 Payments</a>
-
-<a href="expenditures.php">
-💸 Expenditures
-</a>
-
-<a href="long_term_loans.php">
-💳 Long Term Loans
-</a>
-
-<a href="daily_report.php">
-📅 Daily Report
-</a>
-
-<a href="logout.php">🚪 Logout</a>
-
-</div>
-
-
-
-<!-- MAIN -->
+<?php include "sidebar.php"; ?>
 
 <div class="main">
+
+<?php if (isset($_SESSION['message'])): ?>
+
+<div class="flash-success" role="status">
+    <?= htmlspecialchars($_SESSION['message']) ?>
+</div>
+
+<?php unset($_SESSION['message']); ?>
+
+<?php endif; ?>
 
 <div class="box">
 
@@ -771,7 +1056,16 @@ Date Printed: <?= date("d-m-Y") ?>
 </div>
 
 
-<h2>Saved Clothing Records</h2>
+<div class="records-header">
+    <h2>Saved Clothing Records</h2>
+    <button
+        type="button"
+        class="add-product-button"
+        id="open-add-product"
+    >
+        + Add Product
+    </button>
+</div>
 
 
 <!-- SEARCH AND EXPORT -->
@@ -794,12 +1088,12 @@ Search
 
 <a
     href="records.php?<?= http_build_query([
-        'export' => 'excel',
+        'export' => 'csv',
         'search' => $search
     ]) ?>"
-    class="excel-btn"
+    class="csv-btn"
 >
-📊 Export Excel
+📊 Export CSV
 </a>
 
 
@@ -938,11 +1232,197 @@ No records found for "<?= htmlspecialchars($search) ?>"
 
 </table>
 
+<?php if ($total_records > 0): ?>
+
+<nav class="pagination" aria-label="Saved record pages">
+
+    <span>
+        Showing <?= $offset + 1 ?>–<?= min($offset + $page_size, $total_records) ?>
+        of <?= $total_records ?> records
+    </span>
+
+    <div>
+        <?php if ($page > 1): ?>
+            <a href="<?= htmlspecialchars($previous_page_url) ?>">Previous</a>
+        <?php else: ?>
+            <span class="disabled">Previous</span>
+        <?php endif; ?>
+
+        <?php if ($page < $total_pages): ?>
+            <a href="<?= htmlspecialchars($next_page_url) ?>">Next</a>
+        <?php else: ?>
+            <span class="disabled">Next</span>
+        <?php endif; ?>
+    </div>
+
+</nav>
+
+<?php endif; ?>
+
 
 </div>
 
 </div>
 
+<div
+    class="product-modal-backdrop"
+    id="add-product-modal"
+    hidden
+>
+    <section
+        class="product-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-product-title"
+    >
+        <div class="product-modal-header">
+            <h2 id="add-product-title">Add Product</h2>
+            <button
+                type="button"
+                class="product-modal-close"
+                aria-label="Close add product form"
+            >
+                &times;
+            </button>
+        </div>
+
+        <form action="save_product.php" method="POST" class="product-form">
+            <input type="hidden" name="return_to" value="records">
+            <input type="hidden" name="size" value="">
+            <input type="hidden" name="color" value="">
+
+            <div class="form-group">
+                <label for="modal-product-name">Product Name</label>
+                <input
+                    id="modal-product-name"
+                    type="text"
+                    name="product_name"
+                    placeholder="Example: T-Shirt"
+                    required
+                >
+            </div>
+
+            <div class="form-group">
+                <label for="modal-category">Name of Buyer</label>
+                <input
+                    id="modal-category"
+                    type="text"
+                    name="category"
+                    placeholder="Enter name of buyer"
+                    required
+                >
+            </div>
+
+            <div class="form-group">
+                <label for="modal-brand">Brand</label>
+                <input
+                    id="modal-brand"
+                    type="text"
+                    name="brand"
+                    placeholder="Example: Nike"
+                    required
+                >
+            </div>
+
+            <div class="form-group">
+                <label for="modal-quantity">Quantity</label>
+                <input
+                    id="modal-quantity"
+                    type="number"
+                    name="quantity"
+                    min="1"
+                    placeholder="Enter quantity"
+                    required
+                >
+            </div>
+
+            <div class="form-group">
+                <label for="modal-buying-price">Buying Price</label>
+                <input
+                    id="modal-buying-price"
+                    type="number"
+                    name="buying_price"
+                    min="0"
+                    step="0.01"
+                    required
+                >
+            </div>
+
+            <div class="form-group">
+                <label for="modal-selling-price">Selling Price</label>
+                <input
+                    id="modal-selling-price"
+                    type="number"
+                    name="selling_price"
+                    min="0"
+                    step="0.01"
+                    required
+                >
+            </div>
+
+            <div class="form-group">
+                <label for="modal-date">Buyer Date</label>
+                <input
+                    id="modal-date"
+                    type="date"
+                    name="date"
+                    value="<?= date('Y-m-d') ?>"
+                    required
+                >
+            </div>
+
+            <div class="product-form-actions">
+                <button type="submit" name="save_product">
+                    Save Product
+                </button>
+                <button type="button" class="product-form-cancel">
+                    Cancel
+                </button>
+            </div>
+        </form>
+    </section>
+</div>
+
+<script>
+const addProductModal = document.getElementById('add-product-modal');
+const openAddProductButton = document.getElementById('open-add-product');
+const closeAddProductButtons = addProductModal.querySelectorAll(
+    '.product-modal-close, .product-form-cancel'
+);
+let addProductPreviousFocus = null;
+
+function closeAddProductModal() {
+    addProductModal.hidden = true;
+    document.body.classList.remove('modal-open');
+
+    if (addProductPreviousFocus) {
+        addProductPreviousFocus.focus();
+    }
+}
+
+openAddProductButton.addEventListener('click', function () {
+    addProductPreviousFocus = document.activeElement;
+    addProductModal.hidden = false;
+    document.body.classList.add('modal-open');
+    addProductModal.querySelector('input:not([type="hidden"])').focus();
+});
+
+closeAddProductButtons.forEach(function (button) {
+    button.addEventListener('click', closeAddProductModal);
+});
+
+addProductModal.addEventListener('click', function (event) {
+    if (event.target === addProductModal) {
+        closeAddProductModal();
+    }
+});
+
+document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape' && !addProductModal.hidden) {
+        closeAddProductModal();
+    }
+});
+</script>
 
 </body>
 
