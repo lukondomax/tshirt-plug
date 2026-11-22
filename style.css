@@ -1,0 +1,175 @@
+*{
+
+margin:0;
+padding:0;
+box-sizing:border-box;
+font-family:Arial;
+
+}
+
+
+body{
+
+background:#f5f7fb;
+color:#333;
+
+}
+.edit-btn{
+    background:#ffc107;
+    color:black;
+    padding:8px 12px;
+    text-decoration:none;
+    border-radius:5px;
+    margin-right:5px;
+    }
+    
+    .delete-btn{
+    background:#dc3545;
+    color:white;
+    padding:8px 12px;
+    text-decoration:none;
+    border-radius:5px;
+    }
+    
+
+
+
+header{
+
+background:#0d47a1;
+color:white;
+padding:20px 60px;
+display:flex;
+justify-content:space-between;
+align-items:center;
+
+}
+
+
+
+nav a{
+
+color:white;
+text-decoration:none;
+margin-left:25px;
+
+}
+
+
+
+.hero{
+
+height:80vh;
+background:linear-gradient(
+120deg,
+#0d47a1,
+#1976d2
+);
+
+color:white;
+
+display:flex;
+
+justify-content:space-around;
+
+align-items:center;
+
+padding:50px;
+
+}
+
+
+
+.hero h1{
+
+font-size:45px;
+
+}
+
+
+
+.hero p{
+
+margin:25px 0;
+font-size:18px;
+
+}
+
+
+
+.btn{
+
+background:#ffd54f;
+
+padding:15px 30px;
+
+border-radius:30px;
+
+text-decoration:none;
+
+color:#000;
+
+}
+
+
+
+.icon{
+
+font-size:200px;
+
+}
+
+
+
+
+section{
+
+padding:60px;
+
+text-align:center;
+
+}
+
+
+
+.cards{
+
+display:flex;
+
+justify-content:center;
+
+gap:30px;
+
+margin-top:30px;
+
+}
+
+
+
+.cards div{
+
+background:white;
+
+padding:30px;
+
+width:250px;
+
+border-radius:15px;
+
+box-shadow:0 5px 15px #ddd;
+
+}
+
+
+
+footer{
+
+background:#0d47a1;
+
+color:white;
+
+text-align:center;
+
+padding:20px;
+
+}
