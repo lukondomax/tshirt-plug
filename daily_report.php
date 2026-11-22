@@ -1140,68 +1140,15 @@ tbody tr:hover {
 
 </style>
 
+<link rel="stylesheet" href="sidebar.css">
+
 </head>
 
 
 <body>
 
 
-<!-- =====================================================
-     SIDEBAR
-===================================================== -->
-
-<div class="sidebar">
-
-    <h2>
-        T-SHIRT PLUG
-    </h2>
-
-
-    <a href="dashboard.php">
-        🏠 Dashboard
-    </a>
-
-
-    <a href="add_product.php">
-        ➕ Add Clothing Product
-    </a>
-
-
-    <a href="reports.php">
-        📊 Received Clothes
-    </a>
-
-
-    <a href="records.php">
-        📁 Saved Records
-    </a>
-
-
-    <a href="payments.php">
-        💰 Payments
-    </a>
-
- <a href="expenditures.php">
-
-        💸Expenditures
-
-    </a>
-    <a href="long_term_loans.php">
-        💳 Long Term Loans
-    </a>
- <a
-        href="daily_report.php"
-        class="active"
-    >
-        📅 Daily Report
-    </a>
-
-
-    <a href="logout.php">
-        🚪 Logout
-    </a>
-
-</div>
+<?php include "sidebar.php"; ?>
 
 
 <!-- =====================================================
