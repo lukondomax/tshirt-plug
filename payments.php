@@ -30,7 +30,7 @@ if (isset($_POST['add_expenditure'])) {
         $_SESSION['error'] =
             "Please enter a valid date, amount and particular.";
 
-        header("Location: expenditure.php");
+        header("Location: payments.php");
         exit();
     }
 
@@ -64,7 +64,7 @@ if (isset($_POST['add_expenditure'])) {
     $_SESSION['success'] =
         "Expenditure added successfully.";
 
-    header("Location: expenditure.php");
+    header("Location: payments.php");
     exit();
 }
 
@@ -92,7 +92,7 @@ if (isset($_POST['update_expenditure'])) {
         $_SESSION['error'] =
             "Please enter valid expenditure information.";
 
-        header("Location: expenditure.php");
+        header("Location: payments.php");
         exit();
     }
 
@@ -125,7 +125,7 @@ if (isset($_POST['update_expenditure'])) {
     $_SESSION['success'] =
         "Expenditure updated successfully.";
 
-    header("Location: expenditure.php");
+    header("Location: payments.php");
     exit();
 }
 
@@ -166,7 +166,7 @@ if (isset($_GET['delete'])) {
     }
 
 
-    header("Location: expenditure.php");
+    header("Location: payments.php");
     exit();
 }
 
@@ -219,35 +219,178 @@ if (isset($_GET['edit'])) {
 
 
 // ==========================================
-// GET ALL EXPENDITURES
+// EXPENDITURE TOTAL FILTER
 // ==========================================
+
+$today = date('Y-m-d');
+$total_period = isset($_GET['total_period']) && is_string($_GET['total_period'])
+    ? $_GET['total_period']
+    : 'daily';
+$total_error = '';
+$total_expenditure = null;
+$total_start_date = $today;
+$total_end_date = $today;
+$custom_start_date = isset($_GET['start_date']) && is_string($_GET['start_date'])
+    ? $_GET['start_date']
+    : '';
+$custom_end_date = isset($_GET['end_date']) && is_string($_GET['end_date'])
+    ? $_GET['end_date']
+    : '';
+
+$is_valid_date = static function ($value) {
+    if (!is_string($value) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
+        return false;
+    }
+
+    $parts = explode('-', $value);
+    return checkdate((int)$parts[1], (int)$parts[2], (int)$parts[0]);
+};
+
+if ($total_period === 'daily') {
+
+    $total_label = 'Today';
+
+} elseif ($total_period === 'month') {
+
+    $total_start_date = date('Y-m-01');
+    $total_end_date = date('Y-m-t');
+    $total_label = date('F Y');
+
+} elseif ($total_period === 'custom') {
+
+    if (
+        !$is_valid_date($custom_start_date)
+        || !$is_valid_date($custom_end_date)
+    ) {
+
+        $total_error = 'Choose a valid start date and end date for the custom range.';
+
+    } elseif ($custom_start_date > $custom_end_date) {
+
+        $total_error = 'The custom range start date must be on or before the end date.';
+
+    } else {
+
+        $total_start_date = $custom_start_date;
+        $total_end_date = $custom_end_date;
+        $total_label =
+            date('M j, Y', strtotime($total_start_date))
+            . ' - '
+            . date('M j, Y', strtotime($total_end_date));
+
+    }
+
+} else {
+
+    $total_error = 'Choose Daily, This month, or Custom range.';
+    $total_period = 'daily';
+
+}
+
+if ($total_error === '') {
+
+    $total_stmt = mysqli_prepare(
+        $conn,
+        "SELECT COALESCE(SUM(amount), 0)
+         FROM expenditures
+         WHERE expenditure_date BETWEEN ? AND ?"
+    );
+
+    if (!$total_stmt) {
+
+        die(
+            "Could not prepare expenditure total: "
+            . mysqli_error($conn)
+        );
+
+    }
+
+    mysqli_stmt_bind_param(
+        $total_stmt,
+        "ss",
+        $total_start_date,
+        $total_end_date
+    );
+
+    if (!mysqli_stmt_execute($total_stmt)) {
+
+        die(
+            "Could not load expenditure total: "
+            . mysqli_stmt_error($total_stmt)
+        );
+
+    }
+
+    mysqli_stmt_bind_result($total_stmt, $total_expenditure);
+    mysqli_stmt_fetch($total_stmt);
+    $total_expenditure = (float)$total_expenditure;
+    mysqli_stmt_close($total_stmt);
+
+}
+
+
+// ==========================================
+// PAGINATED EXPENDITURE RECORDS
+// ==========================================
+
+$page_size = 10;
+$count_result = mysqli_query(
+    $conn,
+    "SELECT COUNT(*) AS total
+     FROM expenditures"
+);
+
+if (!$count_result) {
+
+    die(
+        "Could not count expenditure records: "
+        . mysqli_error($conn)
+    );
+
+}
+
+$total_records = (int)mysqli_fetch_assoc($count_result)['total'];
+$total_pages = max(1, (int)ceil($total_records / $page_size));
+$page_input = isset($_GET['page']) && is_string($_GET['page'])
+    ? (int)$_GET['page']
+    : 1;
+$page = min(max(1, $page_input), $total_pages);
+$offset = ($page - 1) * $page_size;
 
 $records = mysqli_query(
     $conn,
     "SELECT *
      FROM expenditures
-     ORDER BY expenditure_date DESC, id DESC"
+     ORDER BY expenditure_date DESC, id DESC
+     LIMIT $page_size OFFSET $offset"
 );
 
+if (!$records) {
 
+    die(
+        "Could not load expenditure records: "
+        . mysqli_error($conn)
+    );
 
-// ==========================================
-// TOTAL EXPENDITURE
-// ==========================================
+}
 
-$total_result = mysqli_query(
-    $conn,
-    "SELECT COALESCE(SUM(amount), 0) AS total
-     FROM expenditures"
+$pagination_params = [
+    'total_period' => $total_period
+];
+
+if ($total_period === 'custom') {
+
+    $pagination_params['start_date'] = $custom_start_date;
+    $pagination_params['end_date'] = $custom_end_date;
+
+}
+
+$previous_page_url = 'payments.php?' . http_build_query(
+    array_merge($pagination_params, ['page' => max(1, $page - 1)])
 );
-
-
-$total_row =
-    mysqli_fetch_assoc($total_result);
-
-
-$total_expenditure =
-    (float)$total_row['total'];
+$next_page_url = 'payments.php?' . http_build_query(
+    array_merge($pagination_params, ['page' => min($total_pages, $page + 1)])
+);
 
 ?>
 
@@ -395,6 +538,62 @@ h2 {
     margin-top: 0;
 
     color: #222;
+
+}
+
+.box-heading {
+
+    display: flex;
+
+    justify-content: space-between;
+
+    align-items: center;
+
+    gap: 12px;
+
+}
+
+
+.box-heading h2 {
+
+    margin-bottom: 0;
+
+}
+
+
+.form-toggle {
+
+    width: 42px;
+
+    height: 42px;
+
+    display: inline-flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    padding: 0;
+
+    border-radius: 50%;
+
+    font-size: 26px;
+
+    line-height: 1;
+
+}
+
+
+.add-expenditure-panel {
+
+    margin-top: 20px;
+
+}
+
+
+.add-expenditure-panel[hidden] {
+
+    display: none;
 
 }
 
@@ -586,6 +785,90 @@ button:hover {
 
 }
 
+.total-error {
+
+    margin-top: 16px;
+
+    padding: 12px;
+
+    border-radius: 6px;
+
+    background: #f8d7da;
+
+    color: #721c24;
+
+}
+
+
+.total-filter {
+
+    display: flex;
+
+    flex-wrap: wrap;
+
+    align-items: end;
+
+    gap: 12px;
+
+    margin-top: 18px;
+
+}
+
+
+.total-filter .form-group {
+
+    min-width: 170px;
+
+}
+
+
+.total-filter label {
+
+    color: white;
+
+}
+
+
+.total-filter input,
+.total-filter select {
+
+    padding: 10px;
+
+    border: 1px solid #ccc;
+
+    border-radius: 6px;
+
+    font-size: 14px;
+
+}
+
+
+.total-filter button {
+
+    padding: 10px 14px;
+
+    background: white;
+
+    color: #0d47a1;
+
+    font-weight: bold;
+
+}
+
+
+.total-filter button:hover {
+
+    background: #e8eef8;
+
+}
+
+
+.total-filter [hidden] {
+
+    display: none;
+
+}
+
 
 /* =========================================
    TABLE
@@ -641,6 +924,59 @@ td.particular {
     white-space: pre-wrap;
 
     min-width: 300px;
+
+}
+
+.pagination {
+
+    display: flex;
+
+    justify-content: space-between;
+
+    align-items: center;
+
+    gap: 12px;
+
+    margin-top: 16px;
+
+}
+
+
+.pagination a,
+.pagination span {
+
+    display: inline-block;
+
+    padding: 8px 12px;
+
+    border-radius: 5px;
+
+}
+
+
+.pagination a {
+
+    background: #0d47a1;
+
+    color: white;
+
+    text-decoration: none;
+
+}
+
+
+.pagination a:hover {
+
+    background: #1565c0;
+
+}
+
+
+.pagination .disabled {
+
+    background: #e9ecef;
+
+    color: #777;
 
 }
 
@@ -803,7 +1139,7 @@ T-SHIRT PLUG
 </a>
 
 <a
-    href="expenditure.php"
+    href="payments.php"
     class="active"
 >
 💰 Payments
@@ -868,6 +1204,77 @@ T-SHIRT PLUG
 <?php unset($_SESSION['error']); ?>
 
 <?php endif; ?>
+
+
+
+
+<!-- =========================================
+     TOTAL EXPENDITURE
+========================================= -->
+
+<div class="total-box">
+
+<h3>
+Total Payments
+</h3>
+
+<form method="GET" action="payments.php" class="total-filter">
+
+<div class="form-group">
+<label for="total-period">Show total for</label>
+<select id="total-period" name="total_period">
+    <option value="daily" <?= $total_period === 'daily' ? 'selected' : '' ?>>Daily</option>
+    <option value="month" <?= $total_period === 'month' ? 'selected' : '' ?>>This month</option>
+    <option value="custom" <?= $total_period === 'custom' ? 'selected' : '' ?>>Custom range</option>
+</select>
+</div>
+
+<div
+    class="form-group"
+    id="total-start-date-group"
+    <?= $total_period === 'custom' ? '' : 'hidden' ?>
+>
+<label for="total-start-date">Start date</label>
+<input
+    id="total-start-date"
+    type="date"
+    name="start_date"
+    value="<?= htmlspecialchars($custom_start_date) ?>"
+    <?= $total_period === 'custom' ? 'required' : '' ?>
+>
+</div>
+
+<div
+    class="form-group"
+    id="total-end-date-group"
+    <?= $total_period === 'custom' ? '' : 'hidden' ?>
+>
+<label for="total-end-date">End date</label>
+<input
+    id="total-end-date"
+    type="date"
+    name="end_date"
+    value="<?= htmlspecialchars($custom_end_date) ?>"
+    <?= $total_period === 'custom' ? 'required' : '' ?>
+>
+</div>
+
+<button type="submit">Apply filter</button>
+
+</form>
+
+<?php if ($total_error !== ''): ?>
+<div class="total-error" role="alert">
+    <?= htmlspecialchars($total_error) ?>
+</div>
+<?php else: ?>
+<p>Showing totals for <?= htmlspecialchars($total_label) ?></p>
+<div class="total-amount">
+    TSh <?= number_format($total_expenditure, 2) ?>
+</div>
+<?php endif; ?>
+
+</div>
 
 
 
@@ -966,7 +1373,7 @@ Update Expenditure
 
 
 <a
-    href="expenditure.php"
+    href="payments.php"
     class="cancel-button"
 >
 Cancel
@@ -982,10 +1389,21 @@ Cancel
 
 <?php else: ?>
 
-<h2>
-Add Expenditure
-</h2>
+<div class="box-heading">
+    <h2>Add Expenditure</h2>
+    <button
+        type="button"
+        class="form-toggle"
+        id="add-expenditure-toggle"
+        aria-label="Add expenditure"
+        aria-expanded="false"
+        aria-controls="add-expenditure-panel"
+    >
+        <span aria-hidden="true">+</span>
+    </button>
+</div>
 
+<div class="add-expenditure-panel" id="add-expenditure-panel" hidden>
 
 <form
     method="POST"
@@ -1059,29 +1477,9 @@ Save Expenditure
 
 </form>
 
+</div>
+
 <?php endif; ?>
-
-</div>
-
-
-
-<!-- =========================================
-     TOTAL EXPENDITURE
-========================================= -->
-
-<div class="total-box">
-
-<h3>
-Total Expenditure
-</h3>
-
-<div class="total-amount">
-
-TSh <?= number_format(
-    $total_expenditure
-) ?>
-
-</div>
 
 </div>
 
@@ -1131,7 +1529,7 @@ Expenditure Records
 
 <?php
 
-$count = 1;
+$count = $offset + 1;
 
 while (
     $row = mysqli_fetch_assoc($records)
@@ -1177,7 +1575,7 @@ TSh <?= number_format(
 <td>
 
 <a
-    href="expenditure.php?edit=<?= (int)$row['id'] ?>"
+    href="payments.php?edit=<?= (int)$row['id'] ?>"
     class="edit"
 >
 Edit
@@ -1185,7 +1583,7 @@ Edit
 
 
 <a
-    href="expenditure.php?delete=<?= (int)$row['id'] ?>"
+    href="payments.php?delete=<?= (int)$row['id'] ?>"
     class="delete"
     onclick="return confirm('Are you sure you want to delete this expenditure?');"
 >
@@ -1223,9 +1621,72 @@ No expenditure records found.
 
 </div>
 
+<?php if ($total_records > 0): ?>
+
+<nav class="pagination" aria-label="Expenditure pages">
+
+    <span>
+        Showing <?= $offset + 1 ?>–<?= min($offset + $page_size, $total_records) ?>
+        of <?= $total_records ?> records
+    </span>
+
+    <div>
+        <?php if ($page > 1): ?>
+            <a href="<?= htmlspecialchars($previous_page_url) ?>">Previous</a>
+        <?php else: ?>
+            <span class="disabled">Previous</span>
+        <?php endif; ?>
+
+        <?php if ($page < $total_pages): ?>
+            <a href="<?= htmlspecialchars($next_page_url) ?>">Next</a>
+        <?php else: ?>
+            <span class="disabled">Next</span>
+        <?php endif; ?>
+    </div>
+
+</nav>
+
+<?php endif; ?>
+
 </div>
 
 </div>
+
+<script>
+const totalPeriod = document.getElementById('total-period');
+const totalStartDateGroup = document.getElementById('total-start-date-group');
+const totalEndDateGroup = document.getElementById('total-end-date-group');
+const totalStartDate = document.getElementById('total-start-date');
+const totalEndDate = document.getElementById('total-end-date');
+
+totalPeriod.addEventListener('change', function () {
+    const isCustom = totalPeriod.value === 'custom';
+    totalStartDateGroup.hidden = !isCustom;
+    totalEndDateGroup.hidden = !isCustom;
+    totalStartDate.required = isCustom;
+    totalEndDate.required = isCustom;
+});
+
+const addExpenditureToggle = document.getElementById('add-expenditure-toggle');
+
+if (addExpenditureToggle) {
+    const addExpenditurePanel = document.getElementById('add-expenditure-panel');
+    const addExpenditureIcon = addExpenditureToggle.querySelector('span');
+
+    addExpenditureToggle.addEventListener('click', function () {
+        const isExpanded =
+            addExpenditureToggle.getAttribute('aria-expanded') === 'true';
+
+        addExpenditureToggle.setAttribute('aria-expanded', String(!isExpanded));
+        addExpenditureToggle.setAttribute(
+            'aria-label',
+            isExpanded ? 'Add expenditure' : 'Close add expenditure form'
+        );
+        addExpenditureIcon.textContent = isExpanded ? '+' : '-';
+        addExpenditurePanel.hidden = isExpanded;
+    });
+}
+</script>
 
 </body>
 

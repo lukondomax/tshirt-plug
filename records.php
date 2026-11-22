@@ -729,7 +729,7 @@ td, th {
 
 <a href="records.php">📁 Saved Records</a>
 
-<a href="expenditure.php">💰 Payments</a>
+<a href="payments.php">💰 Payments</a>
 
 <a href="expenditures.php">
 💸 Expenditures

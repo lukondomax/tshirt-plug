@@ -1177,7 +1177,7 @@ tbody tr:hover {
     </a>
 
 
-    <a href="expenditure.php">
+    <a href="payments.php">
         💰 Payments
     </a>
 

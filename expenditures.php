@@ -265,8 +265,7 @@ $total_result = mysqli_query(
     $conn,
     "SELECT
         COUNT(*) AS total_records,
-        COALESCE(SUM(amount), 0) AS total_amount,
-        COALESCE(AVG(amount), 0) AS average_amount
+        COALESCE(SUM(amount), 0) AS total_amount
      FROM business_expenditures"
 );
 
@@ -671,7 +670,7 @@ td.particular {
 <a href="records.php">📁 Saved Records</a>
 
 <!-- Existing Payments page -->
-<a href="expenditure.php">
+<a href="payments.php">
 💰 Payments
 </a>
 
@@ -746,15 +745,6 @@ TSh <?= number_format($total_expenditure) ?>
 
 </div>
 
-<div class="summary-card average">
-
-<div class="summary-title">Average Expenditure</div>
-
-<div class="summary-number">
-TSh <?= number_format($average_amount) ?>
-</div>
-
-</div>
 
 </div>
 
@@ -852,17 +842,7 @@ Save Expenditure
 
 </div>
 
-<!-- TOTAL EXPENDITURE -->
 
-<div class="total-box">
-
-<h3>Total Expenditure</h3>
-
-<div class="total-amount">
-TSh <?= number_format($total_expenditure) ?>
-</div>
-
-</div>
 
 <!-- EXPENDITURE RECORDS -->
 

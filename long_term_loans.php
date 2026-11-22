@@ -1181,7 +1181,7 @@ T-SHIRT PLUG
 
 
 
-<a href="expenditure.php">
+<a href="payments.php">
 💰 Payments
 </a>
  <a href="expenditures.php">

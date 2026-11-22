@@ -1178,7 +1178,7 @@ body{
     <div class="sidebar-divider"></div>
 
 
-    <a href="expenditure.php">
+    <a href="payments.php">
         💰 Payments
     </a>
 
@@ -1587,7 +1587,7 @@ body{
 
 
 
-                <a href="expenditure.php" class="quick-action">
+                <a href="payments.php" class="quick-action">
 
                     <div class="quick-icon">
                         💰
