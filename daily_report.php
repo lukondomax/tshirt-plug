@@ -203,6 +203,165 @@ if (isset($_GET['delete'])) {
 // GET SAVED DAILY REPORTS
 // ======================================================
 
+$today = date('Y-m-d');
+$summary_period = isset($_GET['summary_period']) && is_string($_GET['summary_period'])
+    ? $_GET['summary_period']
+    : 'today';
+$summary_error = '';
+$summary_totals = null;
+$summary_start_date = $today;
+$summary_end_date = $today;
+$custom_start_date = isset($_GET['start_date']) && is_string($_GET['start_date'])
+    ? $_GET['start_date']
+    : '';
+$custom_end_date = isset($_GET['end_date']) && is_string($_GET['end_date'])
+    ? $_GET['end_date']
+    : '';
+
+$is_valid_date = static function ($value) {
+    if (!is_string($value) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
+        return false;
+    }
+
+    $parts = explode('-', $value);
+    return checkdate((int)$parts[1], (int)$parts[2], (int)$parts[0]);
+};
+
+if ($summary_period === 'today') {
+
+    $summary_label = 'Today';
+
+} elseif ($summary_period === 'month') {
+
+    $summary_start_date = date('Y-m-01');
+    $summary_end_date = date('Y-m-t');
+    $summary_label = date('F Y');
+
+} elseif ($summary_period === 'custom') {
+
+    if (
+        !$is_valid_date($custom_start_date)
+        || !$is_valid_date($custom_end_date)
+    ) {
+
+        $summary_error = 'Choose a valid start date and end date for the custom range.';
+
+    } elseif ($custom_start_date > $custom_end_date) {
+
+        $summary_error = 'The custom range start date must be on or before the end date.';
+
+    } else {
+
+        $summary_start_date = $custom_start_date;
+        $summary_end_date = $custom_end_date;
+        $summary_label =
+            date('M j, Y', strtotime($summary_start_date))
+            . ' - '
+            . date('M j, Y', strtotime($summary_end_date));
+
+    }
+
+} else {
+
+    $summary_error = 'Choose Today, This month, or Custom range.';
+    $summary_period = 'today';
+
+}
+
+if ($summary_error === '') {
+
+    $summary_stmt = mysqli_prepare(
+        $conn,
+        "SELECT
+            COALESCE(SUM(total_pieces), 0),
+            COALESCE(SUM(total_sales), 0),
+            COALESCE(SUM(total_cost), 0)
+         FROM daily_reports
+         WHERE report_date BETWEEN ? AND ?"
+    );
+
+    if (!$summary_stmt) {
+
+        die(
+            "Could not prepare daily report summary: "
+            . mysqli_error($conn)
+        );
+
+    }
+
+    mysqli_stmt_bind_param(
+        $summary_stmt,
+        "ss",
+        $summary_start_date,
+        $summary_end_date
+    );
+
+    if (!mysqli_stmt_execute($summary_stmt)) {
+
+        die(
+            "Could not load daily report summary: "
+            . mysqli_stmt_error($summary_stmt)
+        );
+
+    }
+
+    mysqli_stmt_bind_result(
+        $summary_stmt,
+        $summary_pieces,
+        $summary_sales,
+        $summary_cost
+    );
+    mysqli_stmt_fetch($summary_stmt);
+
+    $summary_totals = [
+        'pieces' => (int)$summary_pieces,
+        'sales' => (float)$summary_sales,
+        'cost' => (float)$summary_cost
+    ];
+
+    mysqli_stmt_close($summary_stmt);
+
+}
+
+$page_size = 10;
+$total_result = mysqli_query(
+    $conn,
+    "SELECT COUNT(*) AS total
+     FROM daily_reports"
+);
+
+if (!$total_result) {
+
+    die(
+        "Could not count daily reports: "
+        . mysqli_error($conn)
+    );
+
+}
+
+$total_reports = (int)mysqli_fetch_assoc($total_result)['total'];
+$total_pages = max(1, (int)ceil($total_reports / $page_size));
+$page = max(1, (int)($_GET['page'] ?? 1));
+$page = min($page, $total_pages);
+$offset = ($page - 1) * $page_size;
+$pagination_params = [
+    'summary_period' => $summary_period
+];
+
+if ($summary_period === 'custom') {
+
+    $pagination_params['start_date'] = $custom_start_date;
+    $pagination_params['end_date'] = $custom_end_date;
+
+}
+
+$previous_page_url = 'daily_report.php?' . http_build_query(
+    array_merge($pagination_params, ['page' => max(1, $page - 1)])
+);
+$next_page_url = 'daily_report.php?' . http_build_query(
+    array_merge($pagination_params, ['page' => min($total_pages, $page + 1)])
+);
+
 $reports = mysqli_query(
     $conn,
 
@@ -218,7 +377,8 @@ $reports = mysqli_query(
 
      ORDER BY
         report_date DESC,
-        id DESC"
+        id DESC
+     LIMIT $page_size OFFSET $offset"
 );
 
 
@@ -388,6 +548,90 @@ body {
     margin-top: 0;
 
     color: #222;
+
+}
+
+.table-heading {
+
+    display: flex;
+
+    justify-content: space-between;
+
+    align-items: center;
+
+    gap: 12px;
+
+    margin-bottom: 18px;
+
+}
+
+
+.table-heading h2 {
+
+    margin: 0;
+
+}
+
+
+.add-report-toggle {
+
+    width: 42px;
+
+    height: 42px;
+
+    display: inline-flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    border: none;
+
+    border-radius: 50%;
+
+    background: #0d47a1;
+
+    color: white;
+
+    font-size: 26px;
+
+    line-height: 1;
+
+    cursor: pointer;
+
+}
+
+
+.add-report-toggle:hover {
+
+    background: #083579;
+
+}
+
+
+.add-report-panel {
+
+    margin-bottom: 24px;
+
+    padding: 20px;
+
+    border-radius: 10px;
+
+    background: #f8f9fa;
+
+}
+
+
+.add-report-panel[hidden] {
+
+    display: none;
+
+}
+
+
+.add-report-panel h3 {
+
+    margin: 0 0 16px;
 
 }
 
@@ -573,6 +817,71 @@ body {
 
 }
 
+.summary-filter {
+
+    display: flex;
+
+    flex-wrap: wrap;
+
+    align-items: end;
+
+    gap: 12px;
+
+    margin: 18px 0;
+
+}
+
+
+.summary-filter [hidden] {
+
+    display: none;
+
+}
+
+
+.summary-filter .form-group {
+
+    min-width: 180px;
+
+}
+
+
+.summary-filter select,
+.summary-filter input,
+.summary-filter button {
+
+    padding: 10px;
+
+    border: 1px solid #ccc;
+
+    border-radius: 6px;
+
+    font-size: 14px;
+
+}
+
+
+.summary-filter button {
+
+    background: #0d47a1;
+
+    color: white;
+
+    border: none;
+
+    cursor: pointer;
+
+    font-weight: bold;
+
+}
+
+
+.summary-filter button:hover {
+
+    background: #083579;
+
+}
+
 
 .card-pieces {
 
@@ -653,6 +962,57 @@ tbody tr:nth-child(even) {
 tbody tr:hover {
 
     background: #eef4ff;
+
+}
+
+.pagination {
+
+    display: flex;
+
+    justify-content: space-between;
+
+    align-items: center;
+
+    gap: 12px;
+
+    margin-top: 16px;
+
+}
+
+
+.pagination a,
+.pagination span {
+
+    padding: 8px 12px;
+
+    border-radius: 5px;
+
+}
+
+
+.pagination a {
+
+    background: #0d47a1;
+
+    color: white;
+
+    text-decoration: none;
+
+}
+
+
+.pagination a:hover {
+
+    background: #1565c0;
+
+}
+
+
+.pagination .disabled {
+
+    background: #e9ecef;
+
+    color: #777;
 
 }
 
@@ -890,112 +1250,94 @@ tbody tr:hover {
 
 
     <!-- =================================================
-         ADD DAILY REPORT
+         DAILY REPORT SUMMARY
     ================================================== -->
 
     <div class="box">
 
-        <h2>
-            Add Daily Report
-        </h2>
+        <h2>Daily Report Summary</h2>
 
-
-        <form
-            method="POST"
-            action="daily_report.php"
-            class="report-form"
-        >
-
-
-            <!-- DATE -->
+        <form method="GET" action="daily_report.php" class="summary-filter">
 
             <div class="form-group">
-
-                <label>
-                    Report Date
-                </label>
-
-                <input
-                    type="date"
-                    name="report_date"
-                    value="<?= date('Y-m-d') ?>"
-                    required
-                >
-
+                <label for="summary-period">Show totals for</label>
+                <select id="summary-period" name="summary_period">
+                    <option value="today" <?= $summary_period === 'today' ? 'selected' : '' ?>>Today</option>
+                    <option value="month" <?= $summary_period === 'month' ? 'selected' : '' ?>>This month</option>
+                    <option value="custom" <?= $summary_period === 'custom' ? 'selected' : '' ?>>Custom range</option>
+                </select>
             </div>
 
-
-            <!-- PIECES -->
-
-            <div class="form-group">
-
-                <label>
-                    Total Pieces Sold
-                </label>
-
-                <input
-                    type="number"
-                    name="total_pieces"
-                    min="0"
-                    placeholder="Enter total pieces"
-                    required
-                >
-
-            </div>
-
-
-            <!-- SALES -->
-
-            <div class="form-group">
-
-                <label>
-                    Total Sales (TSh)
-                </label>
-
-                <input
-                    type="number"
-                    name="total_sales"
-                    min="0"
-                    step="0.01"
-                    placeholder="Enter total sales"
-                    required
-                >
-
-            </div>
-
-
-            <!-- COST -->
-
-            <div class="form-group">
-
-                <label>
-                    Total Shop Cost (TSh)
-                </label>
-
-                <input
-                    type="number"
-                    name="total_cost"
-                    min="0"
-                    step="0.01"
-                    placeholder="Enter total cost"
-                    required
-                >
-
-            </div>
-
-
-            <!-- SAVE -->
-
-            <button
-                type="submit"
-                name="save_report"
-                class="save-button"
+            <div
+                class="form-group"
+                id="custom-date-range"
+                <?= $summary_period === 'custom' ? '' : 'hidden' ?>
             >
-                💾 Save Daily Report
-            </button>
+                <label for="start-date">Start date</label>
+                <input
+                    id="start-date"
+                    type="date"
+                    name="start_date"
+                    value="<?= htmlspecialchars($custom_start_date) ?>"
+                    <?= $summary_period === 'custom' ? 'required' : '' ?>
+                >
+            </div>
 
+            <div
+                class="form-group"
+                id="custom-end-date"
+                <?= $summary_period === 'custom' ? '' : 'hidden' ?>
+            >
+                <label for="end-date">End date</label>
+                <input
+                    id="end-date"
+                    type="date"
+                    name="end_date"
+                    value="<?= htmlspecialchars($custom_end_date) ?>"
+                    <?= $summary_period === 'custom' ? 'required' : '' ?>
+                >
+            </div>
+
+            <button type="submit">Apply filter</button>
 
         </form>
+
+        <?php if ($summary_error !== ''): ?>
+
+            <div class="error" role="alert">
+                <?= htmlspecialchars($summary_error) ?>
+            </div>
+
+        <?php else: ?>
+
+            <p>Totals for <?= htmlspecialchars($summary_label) ?></p>
+
+            <div class="summary">
+
+                <div class="summary-card card-pieces">
+                    <h3>Total Pieces</h3>
+                    <div class="amount">
+                        <?= number_format($summary_totals['pieces']) ?>
+                    </div>
+                </div>
+
+                <div class="summary-card card-sales">
+                    <h3>Total Sales</h3>
+                    <div class="amount">
+                        TSh <?= number_format($summary_totals['sales'], 2) ?>
+                    </div>
+                </div>
+
+                <div class="summary-card card-cost">
+                    <h3>Total Cost</h3>
+                    <div class="amount">
+                        TSh <?= number_format($summary_totals['cost'], 2) ?>
+                    </div>
+                </div>
+
+            </div>
+
+        <?php endif; ?>
 
     </div>
 
@@ -1006,9 +1348,125 @@ tbody tr:hover {
 
     <div class="box">
 
-        <h2>
-            Saved Daily Reports
-        </h2>
+        <div class="table-heading">
+
+            <h2>Saved Daily Reports</h2>
+
+            <button
+                type="button"
+                class="add-report-toggle"
+                id="add-report-toggle"
+                aria-label="Add daily report"
+                aria-expanded="false"
+                aria-controls="add-report-panel"
+            >
+                <span aria-hidden="true">+</span>
+            </button>
+
+        </div>
+
+
+        <div class="add-report-panel" id="add-report-panel" hidden>
+
+            <h3>Add Daily Report</h3>
+
+            <form
+                method="POST"
+                action="daily_report.php"
+                class="report-form"
+            >
+
+
+                <!-- DATE -->
+
+                <div class="form-group">
+
+                    <label>
+                        Report Date
+                    </label>
+
+                    <input
+                        type="date"
+                        name="report_date"
+                        value="<?= date('Y-m-d') ?>"
+                        required
+                    >
+
+                </div>
+
+
+                <!-- PIECES -->
+
+                <div class="form-group">
+
+                    <label>
+                        Total Pieces Sold
+                    </label>
+
+                    <input
+                        type="number"
+                        name="total_pieces"
+                        min="0"
+                        placeholder="Enter total pieces"
+                        required
+                    >
+
+                </div>
+
+
+                <!-- SALES -->
+
+                <div class="form-group">
+
+                    <label>
+                        Total Sales (TSh)
+                    </label>
+
+                    <input
+                        type="number"
+                        name="total_sales"
+                        min="0"
+                        step="0.01"
+                        placeholder="Enter total sales"
+                        required
+                    >
+
+                </div>
+
+
+                <!-- COST -->
+
+                <div class="form-group">
+
+                    <label>
+                        Total Shop Cost (TSh)
+                    </label>
+
+                    <input
+                        type="number"
+                        name="total_cost"
+                        min="0"
+                        step="0.01"
+                        placeholder="Enter total cost"
+                        required
+                    >
+
+                </div>
+
+
+                <!-- SAVE -->
+
+                <button
+                    type="submit"
+                    name="save_report"
+                    class="save-button"
+                >
+                    💾 Save Daily Report
+                </button>
+
+            </form>
+
+        </div>
 
 
         <div class="table-container">
@@ -1216,11 +1674,75 @@ tbody tr:hover {
 
         </div>
 
+        <?php if ($total_reports > 0): ?>
+
+            <?php
+            $first_report = $offset + 1;
+            $last_report = min($offset + $page_size, $total_reports);
+            ?>
+
+            <nav class="pagination" aria-label="Daily report pages">
+
+                <span>
+                    Showing <?= $first_report ?>–<?= $last_report ?>
+                    of <?= $total_reports ?> reports
+                </span>
+
+                <div>
+
+                    <?php if ($page > 1): ?>
+                        <a href="<?= htmlspecialchars($previous_page_url) ?>">Previous</a>
+                    <?php else: ?>
+                        <span class="disabled">Previous</span>
+                    <?php endif; ?>
+
+                    <?php if ($page < $total_pages): ?>
+                        <a href="<?= htmlspecialchars($next_page_url) ?>">Next</a>
+                    <?php else: ?>
+                        <span class="disabled">Next</span>
+                    <?php endif; ?>
+
+                </div>
+
+            </nav>
+
+        <?php endif; ?>
+
     </div>
 
 
 </div>
 
+<script>
+const summaryPeriod = document.getElementById('summary-period');
+const customDateRange = document.getElementById('custom-date-range');
+const customEndDate = document.getElementById('custom-end-date');
+const startDateInput = document.getElementById('start-date');
+const endDateInput = document.getElementById('end-date');
+
+summaryPeriod.addEventListener('change', function () {
+    const isCustom = summaryPeriod.value === 'custom';
+    customDateRange.hidden = !isCustom;
+    customEndDate.hidden = !isCustom;
+    startDateInput.required = isCustom;
+    endDateInput.required = isCustom;
+});
+
+const addReportToggle = document.getElementById('add-report-toggle');
+const addReportPanel = document.getElementById('add-report-panel');
+const addReportIcon = addReportToggle.querySelector('span');
+
+addReportToggle.addEventListener('click', function () {
+    const isExpanded = addReportToggle.getAttribute('aria-expanded') === 'true';
+    addReportToggle.setAttribute('aria-expanded', String(!isExpanded));
+    addReportToggle.setAttribute(
+        'aria-label',
+        isExpanded ? 'Add daily report' : 'Close add daily report form'
+    );
+    addReportIcon.textContent = isExpanded ? '+' : '-';
+    addReportPanel.hidden = isExpanded;
+});
+</script>
 
 </body>
 
